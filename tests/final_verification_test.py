@@ -1,3 +1,4 @@
+# tests/final_verification_test.py
 """
 最终验证测试
 确认CrewAI无限运行问题已彻底解决

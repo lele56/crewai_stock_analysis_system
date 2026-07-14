@@ -1,3 +1,4 @@
+# config/agents.yaml
 # 数据收集团队
 market_researcher:
   role: >

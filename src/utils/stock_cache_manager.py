@@ -1,0 +1,61 @@
+# src/utils/stock_cache_manager.py
+"""股票分析缓存管理器"""
+import json
+import logging
+from typing import Dict, Any, List
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+
+class StockCacheManager:
+    """缓存管理"""
+
+    def __init__(self):
+        self.cache = {}
+        self.cache_ttl = 3600
+        self.analysis_history = []
+
+    def check_cache(self, ticker: str) -> bool:
+        if ticker in self.cache:
+            cache_time = self.cache[ticker].get('timestamp', 0)
+            return (datetime.now().timestamp() - cache_time) < self.cache_ttl
+        return False
+
+    def get_from_cache(self, ticker: str) -> Dict[str, Any]:
+        return self.cache.get(ticker, {})
+
+    def save_to_cache(self, ticker: str, data: Dict[str, Any]):
+        self.cache[ticker] = {'data': data, 'timestamp': datetime.now().timestamp()}
+
+    def add_to_history(self, result: Dict[str, Any]):
+        self.analysis_history.append({
+            'company': result['company'], 'ticker': result['ticker'],
+            'timestamp': result['timestamp'], 'success': result['success'],
+            'overall_score': result.get('overall_score', 0),
+            'investment_rating': result.get('investment_rating', {}).get('rating', '未评级')
+        })
+        if len(self.analysis_history) > 1000:
+            self.analysis_history = self.analysis_history[-1000:]
+
+    def get_analysis_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self.analysis_history[-limit:]
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        return {
+            'cache_size': len(self.cache),
+            'history_size': len(self.analysis_history),
+            'cache_ttl': self.cache_ttl
+        }
+
+    def clear_cache(self):
+        self.cache.clear()
+        logger.info("缓存已清空")
+
+    def export_history(self, filepath: str):
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(self.analysis_history, f, ensure_ascii=False, indent=2)
+            logger.info(f"历史记录已导出: {filepath}")
+        except Exception as e:
+            logger.error(f"导出历史记录失败: {str(e)}")

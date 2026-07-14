@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# tests/test_system_structure.py
 """
 简单的系统结构测试
 不需要安装所有依赖，只测试基本结构
@@ -35,7 +36,7 @@ def test_project_structure():
         'src/tools/reporting_tools.py',
         'src/utils/batch_analyzer.py',
         'src/utils/monitor.py',
-        'src/web_app.py',
+        'web/web_app.py',
         'tests/test_stock_analysis_system.py'
     ]
 
@@ -149,7 +150,7 @@ def test_python_syntax():
         'src/tools/reporting_tools.py',
         'src/utils/batch_analyzer.py',
         'src/utils/monitor.py',
-        'src/web_app.py',
+        'web/web_app.py',
         'tests/test_stock_analysis_system.py'
     ]
 

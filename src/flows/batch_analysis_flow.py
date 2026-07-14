@@ -1,3 +1,4 @@
+# src/flows/batch_analysis_flow.py
 """
 批量分析流程控制
 使用Flows实现批量股票分析流程控制
@@ -14,8 +15,6 @@ from src.crews.analysis_crew import AnalysisCrew
 from src.crews.decision_crew import DecisionCrew
 from src.utils.batch_analyzer import BatchStockAnalyzer
 
-# 设置日志
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

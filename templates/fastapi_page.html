@@ -1,0 +1,615 @@
+<!-- templates/fastapi_page.html -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 股票分析系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #e2e8f0;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            text-align: center;
+            padding: 40px 0 20px;
+        }
+        .header h1 {
+            font-size: 2rem;
+            background: linear-gradient(135deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 6px;
+        }
+        .header p {
+            color: #94a3b8;
+            font-size: 0.9rem;
+        }
+        .quick-stocks {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        .quick-stock {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 20px;
+            padding: 6px 16px;
+            cursor: pointer;
+            color: #cbd5e1;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        .quick-stock:hover {
+            background: #3b82f6;
+            border-color: #3b82f6;
+            color: #fff;
+        }
+        .card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 16px;
+        }
+        .card-title {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #f1f5f9;
+        }
+        .form-row {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .form-row input {
+            flex: 1;
+            padding: 10px 14px;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            background: #0f172a;
+            color: #e2e8f0;
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .form-row input:focus { border-color: #3b82f6; }
+        .form-row input::placeholder { color: #64748b; }
+        .btn {
+            padding: 10px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            color: #fff;
+            width: 100%;
+        }
+        .btn-primary:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .progress-section {
+            display: none;
+        }
+        .progress-section.active {
+            display: block;
+        }
+        .progress-bar-wrap {
+            width: 100%;
+            height: 8px;
+            background: #334155;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 12px 0;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #a78bfa);
+            border-radius: 4px;
+            transition: width 0.5s ease;
+            width: 0%;
+        }
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+            color: #94a3b8;
+        }
+        .progress-stage {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .stage-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #334155;
+            transition: background 0.3s;
+        }
+        .stage-dot.done { background: #22c55e; }
+        .stage-dot.running { background: #3b82f6; animation: pulse 1s infinite; }
+        .stage-dot.failed { background: #ef4444; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        .stages {
+            display: flex;
+            gap: 24px;
+            margin: 12px 0;
+            font-size: 0.8rem;
+            color: #64748b;
+        }
+        .stages span {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .stages .active { color: #3b82f6; }
+        .stages .done { color: #22c55e; }
+        .result { display: none; }
+        .result.active { display: block; }
+        .result-card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 24px;
+        }
+        .result-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+        .result-company {
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        .result-ticker {
+            color: #64748b;
+            font-size: 0.85rem;
+        }
+        .score-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .score-circle {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            font-weight: 700;
+        }
+        .score-green { border: 3px solid #22c55e; color: #22c55e; }
+        .score-yellow { border: 3px solid #eab308; color: #eab308; }
+        .score-red { border: 3px solid #ef4444; color: #ef4444; }
+        .rating-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .rating-strong_buy { background: #14532d; color: #4ade80; }
+        .rating-buy { background: #14532d; color: #86efac; }
+        .rating-hold { background: #713f12; color: #fde047; }
+        .rating-sell { background: #7f1d1d; color: #fca5a5; }
+        .rating-strong_sell { background: #7f1d1d; color: #f87171; }
+        .result-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 12px;
+            margin: 16px 0;
+        }
+        .result-item {
+            background: #0f172a;
+            border-radius: 8px;
+            padding: 12px;
+        }
+        .result-item .label {
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-bottom: 4px;
+        }
+        .result-item .value {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #e2e8f0;
+        }
+        .error-msg {
+            background: #7f1d1d;
+            border: 1px solid #991b1b;
+            color: #fca5a5;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-top: 12px;
+        }
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.8rem;
+            color: #94a3b8;
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid #334155;
+        }
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #334155;
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .task-list {
+            list-style: none;
+        }
+        .task-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #334155;
+        }
+        .task-item:last-child { border-bottom: none; }
+        .task-status {
+            font-size: 0.8rem;
+            padding: 2px 8px;
+            border-radius: 12px;
+        }
+        .task-status.running { background: #1e3a5f; color: #60a5fa; }
+        .task-status.completed { background: #14532d; color: #4ade80; }
+        .task-status.failed { background: #7f1d1d; color: #fca5a5; }
+        .tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 20px;
+            background: #1e293b;
+            border-radius: 10px;
+            padding: 4px;
+        }
+        .tab-btn {
+            flex: 1;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            background: transparent;
+            color: #94a3b8;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        .tab-btn.active {
+            background: #0f172a;
+            color: #e2e8f0;
+        }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>AI 股票分析系统</h1>
+            <p>CrewAI Multi-Agent · 数据收集 · 深度分析 · 投资决策</p>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('analyze')">分析股票</button>
+            <button class="tab-btn" onclick="switchTab('tasks')">任务列表</button>
+        </div>
+
+        <div id="tab-analyze" class="tab-panel active">
+            <div class="card">
+                <div class="card-title">快捷选择</div>
+                <div class="quick-stocks">
+                    <span class="quick-stock" onclick="selectStock('贵州茅台','sh600519')">贵州茅台</span>
+                    <span class="quick-stock" onclick="selectStock('比亚迪','sz002594')">比亚迪</span>
+                    <span class="quick-stock" onclick="selectStock('宁德时代','sz300750')">宁德时代</span>
+                    <span class="quick-stock" onclick="selectStock('腾讯控股','hk00700')">腾讯控股</span>
+                    <span class="quick-stock" onclick="selectStock('招商银行','sh600036')">招商银行</span>
+                    <span class="quick-stock" onclick="selectStock('中国平安','sh601318')">中国平安</span>
+                    <span class="quick-stock" onclick="selectStock('美的集团','sz000333')">美的集团</span>
+                    <span class="quick-stock" onclick="selectStock('五粮液','sz000858')">五粮液</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">手动输入</div>
+                <div class="form-row">
+                    <input type="text" id="company" placeholder="公司名称" autocomplete="off">
+                    <input type="text" id="ticker" placeholder="股票代码 (如 sh600519)" autocomplete="off">
+                </div>
+                <button class="btn btn-primary" id="submitBtn" onclick="startAnalysis()">开始分析</button>
+            </div>
+
+            <div class="card progress-section" id="progressSection">
+                <div class="card-title" id="progressTitle">分析中...</div>
+                <div class="progress-bar-wrap">
+                    <div class="progress-bar-fill" id="progressBar"></div>
+                </div>
+                <div class="progress-info">
+                    <span id="progressMsg"></span>
+                    <span id="progressPercent">0%</span>
+                </div>
+                <div class="stages">
+                    <span id="stage-data"><span class="stage-dot"></span>数据收集</span>
+                    <span id="stage-analysis"><span class="stage-dot"></span>深度分析</span>
+                    <span id="stage-decision"><span class="stage-dot"></span>投资决策</span>
+                </div>
+            </div>
+
+            <div class="result" id="resultSection">
+                <div class="result-card">
+                    <div class="result-header">
+                        <div>
+                            <div class="result-company" id="resultCompany"></div>
+                            <div class="result-ticker" id="resultTicker"></div>
+                        </div>
+                        <div class="score-badge">
+                            <span class="rating-badge" id="resultRating"></span>
+                            <div class="score-circle" id="resultScore"></div>
+                        </div>
+                    </div>
+                    <div class="result-grid" id="resultGrid"></div>
+                    <div class="status-bar" id="resultStatus"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="tab-tasks" class="tab-panel">
+            <div class="card">
+                <div class="card-title">最近任务</div>
+                <ul class="task-list" id="taskList"></ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let pollTimer = null;
+        let currentTaskId = null;
+
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            document.querySelector(`[onclick="switchTab('${tab}')"]`).classList.add('active');
+            document.getElementById('tab-' + tab).classList.add('active');
+            if (tab === 'tasks') loadTasks();
+        }
+
+        function selectStock(company, ticker) {
+            document.getElementById('company').value = company;
+            document.getElementById('ticker').value = ticker;
+        }
+
+        async function startAnalysis() {
+            const company = document.getElementById('company').value.trim();
+            const ticker = document.getElementById('ticker').value.trim();
+            if (!company || !ticker) {
+                alert('请输入公司名称和股票代码');
+                return;
+            }
+
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.textContent = '提交中...';
+
+            document.getElementById('resultSection').classList.remove('active');
+            document.getElementById('resultGrid').innerHTML = '';
+
+            try {
+                const resp = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ company, ticker, use_cache: false })
+                });
+                const data = await resp.json();
+
+                if (data.cached) {
+                    showResult(data.result);
+                    btn.disabled = false;
+                    btn.textContent = '开始分析';
+                    return;
+                }
+
+                currentTaskId = data.task_id;
+
+                document.getElementById('progressSection').classList.add('active');
+                document.getElementById('progressTitle').textContent = `${company} (${ticker})`;
+                document.getElementById('progressMsg').textContent = '任务已提交...';
+                document.getElementById('progressBar').style.width = '2%';
+                document.getElementById('progressPercent').textContent = '0%';
+                resetStages();
+
+                btn.textContent = '分析中...';
+                startPolling();
+
+            } catch (e) {
+                btn.disabled = false;
+                btn.textContent = '开始分析';
+                alert('请求失败: ' + e.message);
+            }
+        }
+
+        function resetStages() {
+            ['data', 'analysis', 'decision'].forEach(s => {
+                const el = document.getElementById('stage-' + s);
+                el.classList.remove('active', 'done');
+                el.querySelector('.stage-dot').className = 'stage-dot';
+            });
+        }
+
+        function startPolling() {
+            if (pollTimer) clearInterval(pollTimer);
+            pollTimer = setInterval(pollProgress, 2000);
+            pollProgress();
+        }
+
+        async function pollProgress() {
+            if (!currentTaskId) return;
+            try {
+                const resp = await fetch('/task/' + currentTaskId);
+                const task = await resp.json();
+                updateProgress(task);
+
+                if (task.status === 'completed' || task.status === 'failed') {
+                    clearInterval(pollTimer);
+                    pollTimer = null;
+                    const btn = document.getElementById('submitBtn');
+                    btn.disabled = false;
+                    btn.textContent = '开始分析';
+
+                    if (task.status === 'completed' && task.result) {
+                        showResult(task.result);
+                    }
+                }
+            } catch (e) {
+                console.error('Poll error:', e);
+            }
+        }
+
+        function updateProgress(task) {
+            const pct = task.progress || 0;
+            document.getElementById('progressBar').style.width = pct + '%';
+            document.getElementById('progressPercent').textContent = pct + '%';
+
+            const stage = task.stage || '';
+            const status = task.status || '';
+
+            if (stage === 'data_collection' || stage === 'data') {
+                setStage('data', status);
+            } else if (stage === 'analysis') {
+                setStage('data', 'done');
+                setStage('analysis', status);
+            } else if (stage === 'decision') {
+                setStage('data', 'done');
+                setStage('analysis', 'done');
+                setStage('decision', status);
+            } else if (stage === 'complete') {
+                setStage('data', 'done');
+                setStage('analysis', 'done');
+                setStage('decision', 'done');
+            }
+
+            document.getElementById('progressMsg').textContent = task.message || '';
+        }
+
+        function setStage(name, status) {
+            const el = document.getElementById('stage-' + name);
+            const dot = el.querySelector('.stage-dot');
+            el.classList.remove('active', 'done');
+            dot.className = 'stage-dot';
+            if (status === 'done') {
+                el.classList.add('done');
+                dot.classList.add('done');
+            } else if (status === 'running') {
+                el.classList.add('active');
+                dot.classList.add('running');
+            } else if (status === 'failed') {
+                dot.classList.add('failed');
+            }
+        }
+
+        function showResult(result) {
+            const sec = document.getElementById('resultSection');
+            sec.classList.add('active');
+
+            document.getElementById('resultCompany').textContent = result.company || '';
+            document.getElementById('resultTicker').textContent = result.ticker || '';
+
+            const rating = (result.investment_rating || {}).rating || 'hold';
+            const ratingMap = {
+                'strong_buy': '强烈买入', 'buy': '买入', 'hold': '持有',
+                'sell': '卖出', 'strong_sell': '强烈卖出'
+            };
+            const ratingEl = document.getElementById('resultRating');
+            ratingEl.textContent = ratingMap[rating] || rating;
+            ratingEl.className = 'rating-badge rating-' + rating;
+
+            const score = result.overall_score || 0;
+            const scoreEl = document.getElementById('resultScore');
+            scoreEl.textContent = score.toFixed(0);
+            scoreEl.className = 'score-circle ' + (score >= 70 ? 'score-green' : score >= 50 ? 'score-yellow' : 'score-red');
+
+            const grid = document.getElementById('resultGrid');
+            const items = [];
+            if (result.investment_rating) {
+                items.push({ label: '评级分数', value: (result.investment_rating.score || 0).toFixed(0) + '/100' });
+                items.push({ label: '置信度', value: ((result.investment_rating.confidence || 0) * 100).toFixed(0) + '%' });
+            }
+            if (result.financial_metrics) {
+                items.push({ label: '财务评分', value: (result.financial_metrics.score || 0).toFixed(0) + '/100' });
+            }
+            if (result.risk_metrics) {
+                items.push({ label: '风险评分', value: (result.risk_metrics.score || 0).toFixed(0) + '/100' });
+            }
+            if (result.market_metrics) {
+                items.push({ label: '市场评分', value: (result.market_metrics.score || 0).toFixed(0) + '/100' });
+            }
+            grid.innerHTML = items.map(i => `
+                <div class="result-item">
+                    <div class="label">${i.label}</div>
+                    <div class="value">${i.value}</div>
+                </div>
+            `).join('');
+
+            const statusEl = document.getElementById('resultStatus');
+            statusEl.textContent = '分析完成 · ' + new Date().toLocaleString();
+        }
+
+        async function loadTasks() {
+            try {
+                const resp = await fetch('/tasks');
+                const data = await resp.json();
+                const list = document.getElementById('taskList');
+                if (!data.tasks || data.tasks.length === 0) {
+                    list.innerHTML = '<li class="task-item">暂无任务</li>';
+                    return;
+                }
+                const statusMap = { running: '运行中', completed: '已完成', failed: '失败', pending: '等待中' };
+                list.innerHTML = data.tasks.map(t => `
+                    <li class="task-item">
+                        <span>${t.company} (${t.ticker})</span>
+                        <span class="task-status ${t.status}">${statusMap[t.status] || t.status}</span>
+                    </li>
+                `).join('');
+            } catch (e) {
+                console.error('Load tasks error:', e);
+            }
+        }
+
+        setInterval(() => {
+            if (document.getElementById('tab-tasks').classList.contains('active')) {
+                loadTasks();
+            }
+        }, 5000);
+    </script>
+</body>
+</html>

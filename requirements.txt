@@ -1,63 +1,28 @@
-crewai>=0.28.0
-crewai-tools>=0.4.0
+# Core
+crewai>=0.30.0
+crewai-tools>=0.2.0
+pydantic>=2.0.0
 
-# AI 模型支持
-openai>=1.0.0
+# Web
+flask>=2.3.0
+fastapi>=0.110.0
+uvicorn>=0.27.0
+httpx>=0.27.0
 
-# 环境变量管理
-python-dotenv>=1.0.0
-
-# 数据处理和分析
+# Data
 pandas>=2.0.0
 numpy>=1.24.0
-
-# 金融数据获取
-# yfinance>=0.2.0
-akshare>=1.11.23
-
-# 网络请求
-requests>=2.31.0
-
-# 数据可视化
 matplotlib>=3.7.0
-seaborn>=0.12.0
+akshare>=1.12.0
+tushare>=1.4.0
 
-# Web框架（用于API和界面）
-flask>=2.3.0
-fastapi>=0.100.0
-uvicorn>=0.23.0
+# Report
+python-docx>=1.0.0
+openpyxl>=3.1.0
 
-# 异步支持
-asyncio>=3.4.3
-aiohttp>=3.8.0
-
-# 数据库（可选）
-sqlalchemy>=2.0.0
-# sqlite3
-
-# 调度和定时任务
-schedule>=1.2.0
-
-# 配置管理
-pydantic>=2.0.0
-pyyaml>=6.0
-
-# 日志和监控
-loguru>=0.7.0
-
-# 测试框架
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-
-# 开发工具
-black>=23.0.0
-flake8>=6.0.0
-
-# 性能优化
-cachetools>=5.3.0
-
-# 文档生成
-mkdocs>=1.5.0
-
-# API密钥管理
+# LLM
+openai>=1.0.0
 python-dotenv>=1.0.0
+
+# Utils
+requests>=2.31.0

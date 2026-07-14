@@ -1,3 +1,4 @@
+# src/utils/batch_analyzer.py
 """
 批量分析器
 提供高效的批量股票分析功能
@@ -8,10 +9,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import time
 from datetime import datetime
-import json
-import os
 
-from src.stock_analysis_system import StockAnalysisSystem
+from src.utils.batch_report_generator import generate_batch_summary, export_batch_results
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +28,7 @@ class BatchStockAnalyzer:
         """
         self.max_workers = max_workers
         self.cache_enabled = cache_enabled
+        from src.stock_analysis_system import StockAnalysisSystem
         self.analysis_system = StockAnalysisSystem()
         self.results = {}
         self.errors = []
@@ -244,23 +244,14 @@ class BatchStockAnalyzer:
         total = self.progress['total']
         completed = self.progress['completed']
         failed = self.progress['failed']
-
-        # 计算完成百分比
         self.progress['percentage'] = ((completed + failed) / total) * 100 if total > 0 else 0
-
-        # 计算剩余时间
         if self.progress['start_time'] and completed > 0:
-            elapsed_time = (datetime.now() - self.progress['start_time']).total_seconds()
-            avg_time_per_stock = elapsed_time / completed
-            remaining_stocks = total - completed - failed
-            self.progress['estimated_remaining_time'] = remaining_stocks * avg_time_per_stock
-
-        # 更新结束时间
+            elapsed = (datetime.now() - self.progress['start_time']).total_seconds()
+            self.progress['estimated_remaining_time'] = (total - completed - failed) * (elapsed / completed)
         if self.progress['percentage'] >= 100:
             self.progress['end_time'] = datetime.now()
 
     def _notify_progress_callback(self):
-        """通知进度回调"""
         if self.progress_callback:
             try:
                 self.progress_callback(self.progress.copy())
@@ -268,138 +259,23 @@ class BatchStockAnalyzer:
                 logger.error(f"进度回调失败: {str(e)}")
 
     def _generate_batch_result(self) -> Dict[str, Any]:
-        """生成批量分析结果"""
         success_count = len(self.results)
         failed_count = len(self.errors)
         total_count = self.progress['total']
-
-        result = {
-            'success': True,
-            'total_count': total_count,
-            'success_count': success_count,
-            'failed_count': failed_count,
-            'success_rate': (success_count / total_count) * 100 if total_count > 0 else 0,
-            'results': self.results,
-            'errors': self.errors,
-            'progress': self.progress.copy(),
-            'summary': self._generate_summary()
-        }
-
         logger.info(f"批量分析完成: {success_count}/{total_count} 成功")
-        return result
+        return {
+            'success': True, 'total_count': total_count,
+            'success_count': success_count, 'failed_count': failed_count,
+            'success_rate': (success_count / total_count) * 100 if total_count > 0 else 0,
+            'results': self.results, 'errors': self.errors,
+            'progress': self.progress.copy(), 'summary': self._generate_summary()
+        }
 
     def _generate_summary(self) -> Dict[str, Any]:
-        """生成分析摘要"""
-        summary = {
-            'analysis_time': datetime.now().isoformat(),
-            'total_stocks': self.progress['total'],
-            'successful_analyses': len(self.results),
-            'failed_analyses': len(self.errors),
-            'average_score': 0,
-            'rating_distribution': {},
-            'top_performers': [],
-            'bottom_performers': []
-        }
-
-        # 计算平均评分
-        scores = [result.get('overall_score', 0) for result in self.results.values()]
-        if scores:
-            summary['average_score'] = sum(scores) / len(scores)
-
-        # 评级分布
-        rating_counts = {}
-        for result in self.results.values():
-            rating = result.get('investment_rating', {}).get('rating', '未评级')
-            rating_counts[rating] = rating_counts.get(rating, 0) + 1
-
-        summary['rating_distribution'] = rating_counts
-
-        # 表现最佳和最差的股票
-        sorted_results = sorted(
-            self.results.items(),
-            key=lambda x: x[1].get('overall_score', 0),
-            reverse=True
-        )
-
-        summary['top_performers'] = [
-            {'ticker': ticker, 'score': result.get('overall_score', 0)}
-            for ticker, result in sorted_results[:5]
-        ]
-
-        summary['bottom_performers'] = [
-            {'ticker': ticker, 'score': result.get('overall_score', 0)}
-            for ticker, result in sorted_results[-5:]
-        ]
-
-        return summary
+        return generate_batch_summary(self.results, self.errors, self.progress)
 
     def export_results(self, export_format: str = "json", filepath: str = "") -> str:
-        """
-        导出分析结果
-
-        Args:
-            export_format: 导出格式 (json, csv, excel)
-            filepath: 文件路径
-
-        Returns:
-            导出文件路径
-        """
-        if not filepath:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filepath = f"exports/batch_analysis_{timestamp}.{export_format}"
-
-        # 确保导出目录存在
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-
-        try:
-            if export_format == "json":
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    json.dump({
-                        'results': self.results,
-                        'errors': self.errors,
-                        'summary': self._generate_summary()
-                    }, f, ensure_ascii=False, indent=2)
-
-            elif export_format == "csv":
-                import pandas as pd
-                rows = []
-                for ticker, result in self.results.items():
-                    rows.append({
-                        'ticker': ticker,
-                        'company': result.get('company', ''),
-                        'overall_score': result.get('overall_score', 0),
-                        'rating': result.get('investment_rating', {}).get('rating', ''),
-                        'success': result.get('success', False)
-                    })
-
-                df = pd.DataFrame(rows)
-                df.to_csv(filepath, index=False, encoding='utf-8')
-
-            elif export_format == "excel":
-                import pandas as pd
-                rows = []
-                for ticker, result in self.results.items():
-                    rows.append({
-                        'ticker': ticker,
-                        'company': result.get('company', ''),
-                        'overall_score': result.get('overall_score', 0),
-                        'rating': result.get('investment_rating', {}).get('rating', ''),
-                        'success': result.get('success', False),
-                        'analysis_time': result.get('timestamp', '')
-                    })
-
-                df = pd.DataFrame(rows)
-                df.to_excel(filepath, index=False)
-
-            else:
-                raise ValueError(f"不支持的导出格式: {export_format}")
-
-            logger.info(f"结果已导出: {filepath}")
-            return filepath
-
-        except Exception as e:
-            logger.error(f"导出结果失败: {str(e)}")
-            raise
+        return export_batch_results(self.results, self.errors, export_format, filepath)
 
     def get_progress(self) -> Dict[str, Any]:
         """获取当前进度"""
@@ -418,46 +294,6 @@ class BatchStockAnalyzer:
         self.results.clear()
         self.errors.clear()
         self.progress = {
-            'total': 0,
-            'completed': 0,
-            'failed': 0,
-            'in_progress': 0,
-            'start_time': None,
-            'end_time': None,
-            'estimated_remaining_time': None
+            'total': 0, 'completed': 0, 'failed': 0, 'in_progress': 0,
+            'start_time': None, 'end_time': None, 'estimated_remaining_time': None
         }
-
-
-# 使用示例
-if __name__ == "__main__":
-    # 创建批量分析器
-    analyzer = BatchStockAnalyzer(max_workers=3)
-
-    # 设置进度回调
-    def progress_callback(progress):
-        print(f"进度: {progress['percentage']:.1f}% ({progress['completed']}/{progress['total']})")
-
-    analyzer.set_progress_callback(progress_callback)
-
-    # 测试股票列表
-    test_stocks = [
-        {'company': '苹果公司', 'ticker': 'AAPL'},
-        {'company': '微软', 'ticker': 'MSFT'},
-        {'company': '谷歌', 'ticker': 'GOOGL'},
-        {'company': '亚马逊', 'ticker': 'AMZN'},
-        {'company': '特斯拉', 'ticker': 'TSLA'}
-    ]
-
-    # 执行批量分析
-    print("开始批量分析...")
-    result = analyzer.analyze_multiple_stocks(test_stocks, strategy="parallel")
-
-    print(f"\n分析结果:")
-    print(f"总计: {result['total_count']}")
-    print(f"成功: {result['success_count']}")
-    print(f"失败: {result['failed_count']}")
-    print(f"成功率: {result['success_rate']:.1f}%")
-
-    # 导出结果
-    export_path = analyzer.export_results("json")
-    print(f"结果已导出: {export_path}")

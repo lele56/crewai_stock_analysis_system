@@ -1,1 +1,0 @@
-The final comprehensive risk assessment report for 紫光股份, formatted in Markdown, has been completed and is ready for presentation.

@@ -1,183 +1,15 @@
-"""金融数据工具包
-包含股票数据获取、财务计算等工具
-"""
-from crewai import Agent, Task
+# src/tools/financial_tools.py
+"""金融数据工具包 - 包含财务计算等工具"""
 from typing import Dict, Any, List, Optional
-import akshare as ak
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
-import time
-# 导入我们新创建的AkShare工具
-from .akshare_tools import AkShareTool
 
-# 从reporting_tools导入项目统一的BaseTool类
 from src.tools.reporting_tools import BaseTool
+from src.tools.yfinance_tool import YFinanceTool
 
-# 设置日志配置为DEBUG级别，确保所有调试信息都能被记录
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)  # 确保该模块的日志级别为DEBUG
-
-
-class YFinanceTool(BaseTool):
-    """兼容工具 - 内部使用AkShare实现"""
-
-    name: str = "兼容数据工具"
-    description: str = "兼容工具 - 获取股票的财务数据、价格数据和市场信息（内部使用AkShare实现）"
-
-    def _run(self, ticker: str, period: str = "1y") -> str:
-        """
-        获取股票数据（内部使用AkShareTool实现）
-
-        Args:
-            ticker: 股票代码
-            period: 数据周期 (1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max)
-
-        Returns:
-            股票数据报告
-        """
-        try:
-            # 记录工具已迁移的信息
-            logger.info(f"YFinanceTool已迁移至AkShareTool，正在使用AkShare获取 {ticker} 的数据")
-            
-            # 内部使用AkShareTool实现功能
-            ak_tool = AkShareTool()
-            # 注意：AkShare需要A股格式的股票代码，这里进行简单的格式转换
-            # 如果输入的代码不是A股格式，尝试添加前缀
-            if not (ticker.startswith('sh') or ticker.startswith('sz')):
-                # 默认假设是上交所股票
-                adjusted_ticker = f'sh{ticker}'
-                logger.warning(f"股票代码格式非A股标准格式，尝试添加前缀: {ticker} -> {adjusted_ticker}")
-            else:
-                adjusted_ticker = ticker
-            
-            # 使用AkShareTool获取数据
-            result = ak_tool._run(adjusted_ticker, period)
-            
-            return result
-
-        except Exception as e:
-            # 添加详细的错误日志
-            error_msg = f"获取 {ticker} 数据失败: {str(e)}"
-            logger.error(error_msg)
-            logger.debug(f"[API错误] 详细信息 - 股票代码: {ticker}, 周期: {period}, 错误类型: {type(e).__name__}, 错误详情: {str(e)}")
-            return error_msg
-
-    def _generate_stock_report(self, ticker: str, info: Dict, hist: pd.DataFrame,
-                             financials: pd.DataFrame, balance_sheet: pd.DataFrame,
-                             cashflow: pd.DataFrame) -> str:
-        """生成股票数据报告"""
-        report = f"# {ticker} 股票数据报告\n\n"
-        report += f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
-        # 基本信息
-        report += "## 基本信息\n\n"
-        report += f"- **公司名称**: {info.get('longName', 'N/A')}\n"
-        report += f"- **行业**: {info.get('industry', 'N/A')}\n"
-        report += f"- **市值**: ${info.get('marketCap', 0):,.0f}\n"
-        report += f"- **当前价格**: ${info.get('currentPrice', 0):.2f}\n"
-        report += f"- **52周最高**: ${info.get('fiftyTwoWeekHigh', 0):.2f}\n"
-        report += f"- **52周最低**: ${info.get('fiftyTwoWeekLow', 0):.2f}\n\n"
-
-        # 价格统计
-        if not hist.empty:
-            report += "## 价格统计\n\n"
-            current_price = hist['Close'].iloc[-1]
-            period_return = ((current_price - hist['Close'].iloc[0]) / hist['Close'].iloc[0]) * 100
-
-            report += f"- **当前价格**: ${current_price:.2f}\n"
-            report += f"- **期间涨幅**: {period_return:.2f}%\n"
-            report += f"- **期间最高**: ${hist['High'].max():.2f}\n"
-            report += f"- **期间最低**: ${hist['Low'].min():.2f}\n"
-            report += f"- **平均成交额**: ${hist['Volume'].mean():,.0f}\n\n"
-
-        # 关键财务指标
-        report += "## 关键财务指标\n\n"
-        financial_metrics = self._extract_financial_metrics(info, financials)
-        for metric, value in financial_metrics.items():
-            report += f"- **{metric}**: {value}\n"
-
-        # 技术指标
-        if not hist.empty:
-            report += "\n## 技术指标\n\n"
-            tech_indicators = self._calculate_technical_indicators(hist)
-            for indicator, value in tech_indicators.items():
-                report += f"- **{indicator}**: {value}\n"
-
-        return report
-
-    def _extract_financial_metrics(self, info: Dict, financials: pd.DataFrame) -> Dict[str, str]:
-        """提取关键财务指标"""
-        metrics = {}
-
-        # 从基本信息中提取
-        metrics['市盈率'] = f"{info.get('trailingPE', 'N/A')}"
-        metrics['前瞻市盈率'] = f"{info.get('forwardPE', 'N/A')}"
-        metrics['市净率'] = f"{info.get('priceToBook', 'N/A')}"
-        metrics['股息率'] = f"{info.get('dividendYield', 0) * 100:.2f}%"
-        metrics['Beta'] = f"{info.get('beta', 'N/A')}"
-
-        # 从财务报表中提取
-        if not financials.empty:
-            latest_revenue = financials.iloc[0].get('Total Revenue', 0)
-            if latest_revenue:
-                metrics['最新营收'] = f"${latest_revenue:,.0f}"
-
-            latest_net_income = financials.iloc[0].get('Net Income', 0)
-            if latest_net_income:
-                metrics['最新净利润'] = f"${latest_net_income:,.0f}"
-
-        return metrics
-
-    def _calculate_technical_indicators(self, hist: pd.DataFrame) -> Dict[str, str]:
-        """计算技术指标"""
-        indicators = {}
-
-        if len(hist) < 20:
-            return indicators
-
-        close_prices = hist['Close']
-
-        # 移动平均线
-        ma5 = close_prices.rolling(window=5).mean().iloc[-1]
-        ma20 = close_prices.rolling(window=20).mean().iloc[-1]
-        ma50 = close_prices.rolling(window=50).mean().iloc[-1]
-
-        indicators['MA5'] = f"${ma5:.2f}"
-        indicators['MA20'] = f"${ma20:.2f}"
-        indicators['MA50'] = f"${ma50:.2f}"
-
-        # RSI
-        if len(hist) >= 14:
-            rsi = self._calculate_rsi(close_prices)
-            indicators['RSI(14)'] = f"{rsi:.1f}"
-
-        # MACD
-        if len(hist) >= 26:
-            macd, signal = self._calculate_macd(close_prices)
-            indicators['MACD'] = f"{macd:.3f}"
-            indicators['Signal'] = f"{signal:.3f}"
-
-        return indicators
-
-    def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> float:
-        """计算RSI指标"""
-        delta = prices.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        return rsi.iloc[-1]
-
-    def _calculate_macd(self, prices: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> tuple:
-        """计算MACD指标"""
-        ema_fast = prices.ewm(span=fast).mean()
-        ema_slow = prices.ewm(span=slow).mean()
-        macd = ema_fast - ema_slow
-        signal_line = macd.ewm(span=signal).mean()
-        return macd.iloc[-1], signal_line.iloc[-1]
 
 
 class FinancialCalculatorTool(BaseTool):
@@ -422,134 +254,21 @@ class FinancialCalculatorTool(BaseTool):
         return suggestions
 
 
-class MarketDataTool(BaseTool):
-    """市场数据工具"""
-
-    name: str = "Market Data Tool"
-    description: str = "获取实时市场数据和行业信息"
-
-    def _run(self, query: str, data_type: str = "market_overview") -> str:
-        """
-        获取市场数据
-
-        Args:
-            query: 查询内容
-            data_type: 数据类型 (market_overview, sector_performance, etf_flows, market_sentiment)
-
-        Returns:
-            市场数据报告
-        """
-        try:
-            logger.info(f"获取市场数据: {query}, 类型: {data_type}")
-
-            if data_type == "market_overview":
-                return self._get_market_overview()
-            elif data_type == "sector_performance":
-                return self._get_sector_performance()
-            elif data_type == "market_sentiment":
-                return self._get_market_sentiment()
-            else:
-                return "不支持的数据类型"
-
-        except Exception as e:
-            error_msg = f"获取市场数据失败: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
-
-    def _get_market_overview(self) -> str:
-        """获取市场概览"""
-        # 这里可以集成实际的市场数据API
-        # 目前使用模拟数据
-
-        report = "# 市场概览\n\n"
-        report += f"**更新时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
-        # 主要指数
-        report += "## 主要指数表现\n\n"
-        indices = {
-            "S&P 500": {"price": 4520.35, "change": "+0.85%", "volume": "2.1B"},
-            "NASDAQ": {"price": 14113.70, "change": "+1.20%", "volume": "3.2B"},
-            "DOW JONES": {"price": 35457.31, "change": "+0.45%", "volume": "1.8B"}
-        }
-
-        for index, data in indices.items():
-            report += f"- **{index}**: {data['price']} ({data['change']}) - 成交量: {data['volume']}\n"
-
-        # 市场状态
-        report += "\n## 市场状态\n\n"
-        report += "- **市场情绪**: 积极乐观\n"
-        report += "- **波动率**: 中等 (VIX: 16.5)\n"
-        report += "- **避险情绪**: 低\n"
-        report += "- **资金流向**: 风险资产流入\n"
-
-        return report
-
-    def _get_sector_performance(self) -> str:
-        """获取行业表现"""
-        report = "# 行业表现分析\n\n"
-        report += f"**更新时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
-        # 行业表现数据
-        sectors = {
-            "科技": {"performance": "+2.5%", "trend": "强势上涨", "volume": "高"},
-            "金融": {"performance": "+0.8%", "trend": "温和上涨", "volume": "中"},
-            "医疗": {"performance": "-0.3%", "trend": "弱势整理", "volume": "低"},
-            "能源": {"performance": "+1.2%", "trend": "稳步上涨", "volume": "中"},
-            "消费品": {"performance": "+0.5%", "trend": "小幅波动", "volume": "中"}
-        }
-
-        for sector, data in sectors.items():
-            report += f"- **{sector}**: {data['performance']} - {data['trend']} - 成交量: {data['volume']}\n"
-
-        return report
-
-    def _get_market_sentiment(self) -> str:
-        """获取市场情绪"""
-        report = "# 市场情绪分析\n\n"
-        report += f"**分析时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
-        report += "## 情绪指标\n\n"
-        report += "- **恐慌贪婪指数**: 72 (贪婪)\n"
-        report += "- **看涨/看跌比例**: 1.8:1\n"
-        report += "- **期权看跌/看涨比率**: 0.85\n"
-        report += "- **资金流向**: 净流入\n"
-
-        report += "\n## 情绪分析\n\n"
-        report += "当前市场情绪偏向乐观，投资者风险偏好较高。技术指标显示市场处于强势状态，但需要注意可能的过度乐观风险。"
-
-        return report
-
-
 # 使用示例
 if __name__ == "__main__":
-    # 测试AkShare工具
+    from src.tools.akshare_tools import AkShareTool
     ak_tool = AkShareTool()
-    print("=== 测试AkShare工具 ===")
-    # 注意：akshare需要A股格式的股票代码
+    logger.info("=== 测试AkShare工具 ===")
     result = ak_tool._run("sh600000", "6mo")
-    print(result[:500] + "...")
+    logger.info(result[:500] + "...")
 
-    # 测试金融计算器工具
     calc_tool = FinancialCalculatorTool()
-    print("\n=== 测试金融计算器工具 ===")
+    logger.info("=== 测试金融计算器工具 ===")
     test_data = {
-        "current_assets": 1000000,
-        "current_liabilities": 500000,
-        "inventory": 200000,
-        "cash": 300000,
-        "revenue": 2000000,
-        "gross_profit": 800000,
-        "net_income": 400000,
-        "total_assets": 3000000,
-        "equity": 1500000,
-        "total_debt": 1000000
+        "current_assets": 1000000, "current_liabilities": 500000, "inventory": 200000,
+        "cash": 300000, "revenue": 2000000, "gross_profit": 800000,
+        "net_income": 400000, "total_assets": 3000000, "equity": 1500000, "total_debt": 1000000
     }
     import json
     calc_result = calc_tool._run(json.dumps(test_data))
-    print(calc_result)
-
-    # 测试市场数据工具
-    market_tool = MarketDataTool()
-    print("\n=== 测试市场数据工具 ===")
-    market_result = market_tool._run("market", "market_overview")
-    print(market_result)
+    logger.info(calc_result)

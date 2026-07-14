@@ -1,3 +1,4 @@
+# main.py
 """
 股票分析系统主入口
 提供多种使用模式：单股票分析、批量分析、交互式流程等
@@ -15,12 +16,13 @@ load_dotenv()
 # 添加src目录到路径
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
+from src.config import Config
 from src.stock_analysis_system import StockAnalysisSystem
 from src.flows.investment_flow import SmartInvestmentFlow
 from src.flows.batch_analysis_flow import BatchAnalysisFlow
 
-# 设置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+_log_level = getattr(logging, Config.LOG_LEVEL, logging.INFO)
+logging.basicConfig(level=_log_level, format=Config.LOG_FORMAT)
 logger = logging.getLogger(__name__)
 
 

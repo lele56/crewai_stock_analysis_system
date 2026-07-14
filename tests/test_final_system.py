@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# tests/test_final_system.py
 """
 最终系统测试
 验证完整的股票分析系统功能
@@ -9,7 +10,7 @@ import os
 from datetime import datetime
 
 # 添加src目录到路径
-sys.path.append('src')
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 def test_basic_imports():
     """测试基本导入"""
@@ -125,7 +126,6 @@ def test_configuration_files():
         config_files = [
             'config/agents.yaml',
             'config/tasks.yaml',
-            'config/tools.yaml'
         ]
 
         for config_file in config_files:
@@ -151,7 +151,7 @@ def test_web_app_structure():
 
     try:
         # 检查Web应用文件
-        web_app_path = 'src/web_app.py'
+        web_app_path = 'web/web_app.py'
         if os.path.exists(web_app_path):
             print("✅ Web应用文件存在")
         else:
@@ -222,7 +222,7 @@ python main.py interactive
 
 ### Web界面使用
 ```bash
-python src/web_app.py
+python web/web_app.py
 # 访问 http://localhost:5000
 ```
 

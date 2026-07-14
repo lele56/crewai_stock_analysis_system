@@ -1,3 +1,4 @@
+# src/utils/http_utils.py
 """
 HTTP工具模块
 提供增强的HTTP请求功能，包含重试机制、连接错误处理等
@@ -261,18 +262,15 @@ def with_retry(max_retries: int = 3, backoff_factor: float = 0.5):
 
 # 使用示例
 if __name__ == "__main__":
-    # 配置日志
-    logging.basicConfig(level=logging.INFO)
-    
+    # 独立运行时配置日志
     # 示例1: 使用增强型HTTP客户端
     with EnhancedHTTPClient(max_retries=3) as client:
         try:
-            response = client.get("https://httpbin.org/status/503")  # 测试重试机制
-            print(f"响应状态码: {response.status_code}")
+            response = client.get("https://httpbin.org/status/503")
+            logger.info(f"响应状态码: {response.status_code}")
         except Exception as e:
-            print(f"请求失败: {e}")
+            logger.error(f"请求失败: {e}")
     
-    # 示例2: 使用with_retry装饰器
     @with_retry
     def example_function():
         raise ConnectError("模拟连接错误")
@@ -280,4 +278,4 @@ if __name__ == "__main__":
     try:
         example_function()
     except Exception as e:
-        print(f"装饰器测试 - 最终失败: {e}")
+        logger.error(f"装饰器测试 - 最终失败: {e}")

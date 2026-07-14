@@ -1,202 +1,47 @@
-# 数据收集任务
-market_research_task:
-  description: >
-    对{company}进行全面的市场研究，包括：
-    1. 最近3-6个月的股价走势分析
-    2. 行业竞争态势和市场份额分析
-    3. 相关市场新闻和重大事件梳理
-    4. 分析师评级和观点汇总
-    5. 宏观经济环境对该公司的影响
-  expected_output: >
-    详细的市场研究报告，包含数据来源、关键发现和趋势分析，
-    格式为结构化的Markdown文档，字数不少于800字。
-  agent: market_researcher
+# config/tasks.yaml
+# 数据收集团队任务
+market_research:
+  description: "收集{company}的市场数据和行业信息"
+  expected_output: "市场研究报告"
 
-financial_data_collection_task:
-  description: >
-    分析{company}的财务健康状况：
-    1. 最新季度财报关键指标提取（营收、利润、毛利率等）
-    2. 过去3年的财务趋势分析
-    3. 负债比率和现金流状况评估
-    4. 与同行业主要竞争对手的财务对比
-    5. 财务健康状况综合评分
-  expected_output: >
-    完整的财务分析报告，包含详细的财务指标对比分析、
-    趋势图表和风险提示，输出为结构化数据格式。
-  agent: financial_data_expert
+financial_data_collection:
+  description: "收集{company}的财务报表和财务指标"
+  expected_output: "财务数据报告"
 
-technical_analysis_task:
-  description: >
-    对{company}进行技术面分析：
-    1. 主要技术指标计算（MA、RSI、MACD、KDJ等）
-    2. 价格趋势和关键支撑阻力位识别
-    3. 成交量分析和量价关系研究
-    4. 图表模式识别和形态分析
-    5. 技术面综合评级
-  expected_output: >
-    技术分析报告，包含技术指标数值、图表分析、
-    交易信号建议，格式为技术分析标准格式。
-  agent: technical_analyst
+technical_data_collection:
+  description: "收集{company}的技术分析数据"
+  expected_output: "技术数据报告"
 
-# 分析任务
+# 分析团队任务
 fundamental_analysis_task:
-  description: >
-    深入进行基本面分析：
-    1. 商业模式评估和可持续性分析
-    2. 竞争优势识别和护城河分析
-    3. 管理团队质量和公司治理评估
-    4. 成长性和盈利能力预测
-    5. 内在价值评估（DCF、可比公司等）
-  expected_output: >
-    基本面分析报告，包含公司价值评估、成长性预测、
-    竞争优势分析和投资价值判断。
-  agent: fundamental_analyst
+  description: "对{company}进行全面的基本面分析"
+  expected_output: "详细的基本面分析报告"
 
 risk_assessment_task:
-  description: >
-    全面风险评估：
-    1. 市场风险（系统性风险、行业风险）
-    2. 公司特有风险（经营风险、财务风险）
-    3. 流动性风险和估值风险
-    4. 监管和政策风险
-    5. ESG相关风险分析
-    6. 风险等级评定和应对建议
-  expected_output: >
-    风险评估报告，包含风险识别、等级评定、
-    影响程度分析和风险控制建议。
-  agent: risk_assessment_specialist
+  description: "对{company}进行全面的风险评估"
+  expected_output: "全面的风险评估报告"
 
 industry_analysis_task:
-  description: >
-    行业地位分析：
-    1. 行业规模和增长趋势分析
-    2. {company}在行业中的市场份额和地位
-    3. 主要竞争对手分析和对比
-    4. 行业发展前景预测
-    5. 技术变革和颠覆性风险
-  expected_output: >
-    行业分析报告，包含行业概况、竞争格局、
-    公司地位分析和发展前景预测。
-  agent: industry_expert
+  description: "对{company}进行深度行业分析"
+  expected_output: "深度行业分析报告"
 
-# 决策任务
-investment_recommendation_task:
-  description: >
-    基于所有分析结果制定投资建议：
-    1. 综合评估投资价值和风险收益比
-    2. 确定合理的估值区间和目标价位
-    3. 给出明确的投资建议（买入/增持/持有/减持/卖出）
-    4. 制定具体的投资策略和时机建议
-    5. 提供风险提示和止损建议
-  expected_output: >
-    完整的投资建议报告，包含投资评级、目标价位、
-    策略建议和风险提示，格式为专业投资报告。
-  agent: investment_strategy_advisor
-  output_file: investment_report.md
+quantitative_validation_task:
+  description: "对{company}进行量化验证分析"
+  expected_output: "量化验证报告"
+
+analysis_coordination_task:
+  description: "协调和整合所有分析工作"
+  expected_output: "最终投资分析报告"
+
+# 决策团队任务
+investment_strategy_task:
+  description: "为{company}制定投资策略建议"
+  expected_output: "投资策略建议报告"
 
 report_generation_task:
-  description: >
-    生成最终的投资分析报告：
-    1. 整合所有分析结果和数据
-    2. 按照标准格式编写完整报告
-    3. 添加图表和可视化内容
-    4. 确保报告逻辑清晰、内容完整
-    5. 质量检查和格式优化
-  expected_output: >
-    最终的投资分析报告（Markdown格式），包含执行摘要、
-    分析过程、结论建议等完整章节。
-  agent: report_generator
-  output_file: final_investment_report.md
+  description: "生成{company}的标准化投资分析报告"
+  expected_output: "标准化投资分析报告"
 
-quality_control_task:
-  description: >
-    执行质量控制和验证：
-    1. 验证所有数据的准确性和一致性
-    2. 检查分析逻辑的合理性
-    3. 评估结论的可靠性
-    4. 确保报告格式规范
-    5. 提出改进建议
-  expected_output: >
-    质量控制报告，包含验证结果、问题识别、
-    改进建议和最终质量评级。
-  agent: quality_control_specialist
-
-# 特殊任务
-data_validation_task:
-  description: >
-    验证和清洗数据：
-    1. 检查所有数据源的可靠性
-    2. 识别和处理异常数据
-    3. 验证数据的一致性和完整性
-    4. 数据标准化处理
-    5. 生成数据质量报告
-  expected_output: >
-    数据验证报告，包含数据质量评估、
-    异常数据记录和处理结果。
-  agent: data_validation_expert
-
-sentiment_analysis_task:
-  description: >
-    分析市场情绪：
-    1. 收集和分析新闻情绪
-    2. 社交媒体讨论情绪分析
-    3. 分析师观点情绪评估
-    4. 市场预期分析
-    5. 情绪趋势预测
-  expected_output: >
-    市场情绪分析报告，包含情绪指标、
-    趋势分析和预期评估。
-  agent: market_sentiment_analyst
-
-# 协作任务
-dynamic_task_allocation_task:
-  description: >
-    动态任务分配和负载均衡：
-    1. 分析待处理任务的优先级和复杂度
-    2. 评估各智能体的当前负载和能力匹配度
-    3. 实现最优的任务分配算法
-    4. 监控任务执行进度和完成质量
-    5. 动态调整任务分配策略
-  expected_output: >
-    任务分配报告，包含分配策略、负载分析、
-    效率评估和优化建议。
-  agent: task_allocation_coordinator
-
-collective_decision_task:
-  description: >
-    集体投资决策制定：
-    1. 组织投资决策委员会讨论
-    2. 协调不同专家的意见和观点
-    3. 实施多种决策机制（投票、共识、加权等）
-    4. 记录决策过程和理由
-    5. 形成最终的投资决策建议
-  expected_output: >
-    集体决策报告，包含决策过程、专家意见、
-    投票结果和最终决策建议。
-  agent: decision_committee_chairman
-
-collaboration_optimization_task:
-  description: >
-    协作效率优化分析：
-    1. 监控智能体间的通信模式
-    2. 分析协作效率和瓶颈
-    3. 识别工作流程中的问题
-    4. 提供协作优化建议
-    5. 实施协作改进措施
-  expected_output: >
-    协作优化报告，包含效率分析、瓶颈识别、
-    优化建议和改进效果评估。
-  agent: collaboration_optimizer
-
-collaboration_coordination_task:
-  description: >
-    协作协调和整合：
-    1. 协调各团队间的协作活动
-    2. 整合不同智能体的分析结果
-    3. 解决协作过程中的冲突
-    4. 优化跨团队工作流程
-    5. 确保协作目标的达成
-  expected_output: >
-    协作协调报告，包含协作活动记录、
-    冲突解决过程和整合结果。
-  agent: collaboration_optimizer
+quality_assurance_task:
+  description: "对{company}的报告进行质量审核和把关"
+  expected_output: "质量审核报告"

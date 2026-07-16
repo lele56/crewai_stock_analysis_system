@@ -103,9 +103,9 @@ class Config:
 
     # ── Profile → Agent 映射 ─────────────────────
     PROFILE_AGENTS_DATA = {
-        AnalysisProfile.RAPID: ["market_researcher", "financial_data_expert", "technical_analyst"],
-        AnalysisProfile.STANDARD: ["market_researcher", "financial_data_expert", "technical_analyst", "data_collection_coordinator"],
-        AnalysisProfile.DEEP: ["market_researcher", "financial_data_expert", "technical_analyst", "data_collection_coordinator"],
+        AnalysisProfile.RAPID: ["market_researcher", "financial_data_expert", "financial_ratio_analyst", "technical_analyst"],
+        AnalysisProfile.STANDARD: ["market_researcher", "financial_data_expert", "financial_ratio_analyst", "technical_analyst", "data_collection_coordinator"],
+        AnalysisProfile.DEEP: ["market_researcher", "financial_data_expert", "financial_ratio_analyst", "technical_analyst", "data_collection_coordinator"],
     }
     PROFILE_AGENTS_ANALYSIS = {
         AnalysisProfile.RAPID: ["fundamental_analyst", "risk_assessment_specialist", "industry_expert"],

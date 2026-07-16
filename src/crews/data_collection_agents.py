@@ -110,6 +110,11 @@ def _get_default_agents_config() -> dict:
             "goal": "收集公司财务报表和财务指标",
             "backstory": "专注财务数据收集的专业人员",
         },
+        "financial_ratio_analyst": {
+            "role": "财务比率分析师",
+            "goal": "分步计算财务比率，先算流动性+盈利能力，再算杠杆+估值",
+            "backstory": "专注财务比率计算的专业人员，分步计算避免输出过长",
+        },
         "technical_analyst": {
             "role": "技术分析师",
             "goal": "收集技术分析所需的价格和交易数据",

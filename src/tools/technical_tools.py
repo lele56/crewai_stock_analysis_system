@@ -166,107 +166,94 @@ class TechnicalAnalysisTool(BaseTool):
         return calculate_all_volume_indicators(df)
 
     def _generate_technical_report(self, df: pd.DataFrame, results: dict, analysis_type: str) -> str:
-        """生成技术分析报告"""
-        report = "# 技术分析报告\n\n"
-        report += f"**分析时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        report += f"**数据期间**: {df.index[0].strftime('%Y-%m-%d')} 至 {df.index[-1].strftime('%Y-%m-%d')}\n"
-        report += f"**当前价格**: ${df['Close'].iloc[-1]:.2f}\n\n"
+        """生成技术分析报告（精简版，适配所有模型）"""
+        lines = [
+            f"技术分析: {analysis_type}",
+            f"数据期间: {df.index[0].strftime('%Y-%m-%d')} 至 {df.index[-1].strftime('%Y-%m-%d')}, 当前价格: ¥{df['Close'].iloc[-1]:.2f}",
+        ]
 
         if "trend_indicators" in results:
-            report += self._generate_trend_analysis(df, results["trend_indicators"])
+            lines.append(self._generate_trend_analysis(df, results["trend_indicators"]))
         if "momentum_indicators" in results:
-            report += self._generate_momentum_analysis(results["momentum_indicators"])
+            lines.append(self._generate_momentum_analysis(results["momentum_indicators"]))
         if "volatility_indicators" in results:
-            report += self._generate_volatility_analysis(results["volatility_indicators"])
+            lines.append(self._generate_volatility_analysis(results["volatility_indicators"]))
         if "volume_indicators" in results:
-            report += self._generate_volume_analysis(df, results["volume_indicators"])
+            lines.append(self._generate_volume_analysis(df, results["volume_indicators"]))
+        if "trading_signals" in results:
+            signals = results["trading_signals"]
+            lines.append(f"交易信号: {signals}")
 
-        report += self._generate_trading_recommendations(results)
-        return report
+        return "\n".join(lines)
 
     def _generate_trend_analysis(self, df: pd.DataFrame, indicators: dict) -> str:
-        """生成趋势分析"""
+        """生成趋势分析（精简版）"""
         current_price = df["Close"].iloc[-1]
         ma_20 = indicators["ma_20"].iloc[-1]
         ma_50 = indicators["ma_50"].iloc[-1]
 
-        analysis = "## 趋势分析\n\n### 移动平均线\n"
-        analysis += f"- 当前价格: ${current_price:.2f}\n- MA20: ${ma_20:.2f}\n- MA50: ${ma_50:.2f}\n"
         if current_price > ma_20 > ma_50:
-            analysis += "- **趋势判断**: 强势上涨\n"
+            trend = "强势上涨"
         elif current_price > ma_20 and ma_20 < ma_50:
-            analysis += "- **趋势判断**: 短期反弹\n"
+            trend = "短期反弹"
         elif current_price < ma_20 < ma_50:
-            analysis += "- **趋势判断**: 弱势下跌\n"
+            trend = "弱势下跌"
         else:
-            analysis += "- **趋势判断**: 震荡整理\n"
+            trend = "震荡整理"
 
         macd_data = indicators["macd"]
-        analysis += "\n### MACD指标\n"
-        analysis += f"- MACD线: {macd_data['macd_line'].iloc[-1]:.3f}\n"
-        analysis += f"- 信号线: {macd_data['signal_line'].iloc[-1]:.3f}\n"
-        analysis += (
-            "- **信号**: 看涨信号\n"
-            if macd_data["macd_line"].iloc[-1] > macd_data["signal_line"].iloc[-1]
-            else "- **信号**: 看跌信号\n"
-        )
-        return analysis
+        macd_signal = "看涨" if macd_data["macd_line"].iloc[-1] > macd_data["signal_line"].iloc[-1] else "看跌"
+
+        return f"趋势: {trend}, 价格: ¥{current_price:.2f}, MA20: ¥{ma_20:.2f}, MA50: ¥{ma_50:.2f}, MACD: {macd_signal}"
 
     def _generate_momentum_analysis(self, indicators: dict) -> str:
-        """生成动量分析"""
+        """生成动量分析（精简版）"""
         rsi_current = indicators["rsi"].iloc[-1]
-        analysis = "\n## 动量分析\n\n### RSI指标\n"
-        analysis += f"- RSI(14): {rsi_current:.1f}\n"
         if rsi_current > 70:
-            analysis += "- **状态**: 超买区域\n"
+            rsi_state = "超买"
         elif rsi_current < 30:
-            analysis += "- **状态**: 超卖区域\n"
+            rsi_state = "超卖"
         else:
-            analysis += "- **状态**: 正常区域\n"
+            rsi_state = "正常"
 
         stochastic_data = indicators["stochastic"]
-        analysis += "\n### 随机指标\n"
-        analysis += f"- %K: {stochastic_data['k_percent'].iloc[-1]:.1f}\n"
-        analysis += f"- %D: {stochastic_data['d_percent'].iloc[-1]:.1f}\n"
-        if stochastic_data["k_percent"].iloc[-1] > 80:
-            analysis += "- **信号**: 超买信号\n"
-        elif stochastic_data["k_percent"].iloc[-1] < 20:
-            analysis += "- **信号**: 超卖信号\n"
-        return analysis
+        k_val = stochastic_data["k_percent"].iloc[-1]
+        if k_val > 80:
+            stoch_signal = "超买"
+        elif k_val < 20:
+            stoch_signal = "超卖"
+        else:
+            stoch_signal = "正常"
+
+        return f"动量: RSI={rsi_current:.1f}({rsi_state}), K%={k_val:.1f}, D%={stochastic_data['d_percent'].iloc[-1]:.1f}({stoch_signal})"
 
     def _generate_volatility_analysis(self, indicators: dict) -> str:
-        """生成波动率分析"""
+        """生成波动率分析（精简版）"""
         atr_current = indicators["atr"].iloc[-1]
         bb_width = indicators["bollinger_bandwidth"].iloc[-1]
-        analysis = "\n## 波动率分析\n\n### 平均真实范围 (ATR)\n"
-        analysis += f"- ATR(14): {atr_current:.2f}\n"
-        analysis += "\n### 布林带\n"
-        analysis += f"- 带宽: {bb_width:.1f}%\n"
         if bb_width > 20:
-            analysis += "- **波动状态**: 高波动\n"
+            vol_state = "高波动"
         elif bb_width < 10:
-            analysis += "- **波动状态**: 低波动\n"
+            vol_state = "低波动"
         else:
-            analysis += "- **波动状态**: 正常波动\n"
-        return analysis
+            vol_state = "正常"
+        return f"波动率: ATR={atr_current:.2f}, 布林带宽={bb_width:.1f}%({vol_state})"
 
     def _generate_volume_analysis(self, df: pd.DataFrame, indicators: dict) -> str:
-        """生成成交量分析"""
+        """生成成交量分析（精简版）"""
         volume_change = indicators["volume_change"].iloc[-1]
-        analysis = "\n## 成交量分析\n\n### 成交量变化\n"
-        analysis += f"- 成交量变化率: {volume_change:+.1f}%\n"
         if volume_change > 50:
-            analysis += "- **成交量状态**: 显著放量\n"
+            vol_status = "显著放量"
         elif volume_change < -30:
-            analysis += "- **成交量状态**: 明显缩量\n"
+            vol_status = "明显缩量"
         else:
-            analysis += "- **成交量状态**: 正常水平\n"
+            vol_status = "正常"
 
         obv_current = indicators["obv"].iloc[-1]
         obv_prev = indicators["obv"].iloc[-2]
-        analysis += "\n### 能量潮指标\n"
-        analysis += "- **资金流向**: 资金流入\n" if obv_current > obv_prev else "- **资金流向**: 资金流出\n"
-        return analysis
+        flow = "流入" if obv_current > obv_prev else "流出"
+
+        return f"成交量: 变化率={volume_change:+.1f}%({vol_status}), 资金{flow}"
 
     def _generate_trading_recommendations(self, results: dict) -> str:
         """生成交易建议"""

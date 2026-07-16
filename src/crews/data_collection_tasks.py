@@ -7,6 +7,7 @@ from crewai import Task
 _TASK_AGENT_MAP = {
     "market_research": "market_researcher",
     "financial_data_collection": "financial_data_expert",
+    "financial_ratio_calculation": "financial_ratio_analyst",
     "technical_data_collection": "technical_analyst",
     "data_collection_coordination": "data_collection_coordinator",
 }
@@ -19,8 +20,12 @@ def _get_default_tasks_config() -> dict:
             "expected_output": "市场研究报告",
         },
         "financial_data_collection": {
-            "description": "收集{company}的财务报表和财务指标",
+            "description": "收集{company}的财务报表和关键财务指标",
             "expected_output": "财务数据报告",
+        },
+        "financial_ratio_calculation": {
+            "description": "对{company}进行财务比率分析，分两步：1)先算流动性+盈利能力 2)再算杠杆+估值。每次只算部分指标，不要一次算完",
+            "expected_output": "财务比率分析报告",
         },
         "technical_data_collection": {
             "description": "收集{company}的技术分析数据",

@@ -4,29 +4,6 @@
 所有字段映射集中在 schemas.py，接口变更只需改一处。
 """
 
-# ═══════════════════════════════════════════════════════════════
-# 阻止 py_mini_racer 被 akshare 导入
-# 原因：py_mini_racer 内嵌 V8 JS 引擎，在 Windows 上 V8 的
-# ConfigurablePool 内存分配器与 Python 3.11+ 的内存池冲突，
-# 触发 C++ 层 FATAL 崩溃，无法被 try/except 捕获。
-# 我们的数据源（腾讯HTTP/新浪HTTP/TickFlow）不依赖 JS 执行，
-# 屏蔽它不影响核心功能。
-# ═══════════════════════════════════════════════════════════════
-import sys
-import types
-
-
-_NOT_FOUND = type("_ModuleNotFound", (ModuleNotFoundError,), {})
-_FAKE_MINIRACER = types.ModuleType("py_mini_racer")
-
-
-def _fake_mini_racer_error(*_args, **_kwargs):
-    raise _NOT_FOUND("py_mini_racer 已被屏蔽，当前数据源不需要它")
-
-
-_FAKE_MINIRACER.MiniRacer = _fake_mini_racer_error
-sys.modules["py_mini_racer"] = _FAKE_MINIRACER
-
 from datetime import datetime, timedelta
 import http.client
 import json
@@ -493,23 +470,33 @@ def fill_business_ths(code: str, info: dict) -> None:
 # ═══════════════════════════════════════════════════════════════════
 
 
-def get_financial_data_ths(code: str, statement_type: str = "all") -> pd.DataFrame:
-    """从同花顺获取财务报表（替代已失效的新浪和东方财富API）"""
-    cb = CircuitBreaker.get("ths_financial")
+def get_financial_data_em(code: str, statement_type: str = "all") -> pd.DataFrame:
+    """从东方财富获取财务报表，按报表类型路由到不同API。
+    东方财富纯HTTP接口，不依赖 py_mini_racer，不会崩溃。
+    """
+    cb = CircuitBreaker.get("em_financial")
     if not cb.allow_request():
         return pd.DataFrame()
+
+    # 东方财富格式: 600519.SH / 000001.SZ
+    symbol = f"{code}.{'SH' if code.startswith('6') else 'SZ'}"
+
     try:
         import akshare as ak
 
-        df = ak.stock_financial_abstract_ths(symbol=code, indicator="按年度")
+        df = pd.DataFrame()
+        if "资产负债" in statement_type:
+            df = ak.stock_balance_sheet_by_report_em(symbol=symbol)
+        elif "现金流" in statement_type:
+            df = ak.stock_cash_flow_sheet_by_report_em(symbol=symbol)
+        elif "利润" in statement_type:
+            df = ak.stock_profit_sheet_by_report_em(symbol=symbol)
+        else:
+            df = ak.stock_financial_analysis_indicator_em(symbol=symbol, indicator="按报告期")
+
         if not df.empty:
-            for col in df.columns:
-                try:
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
-                except (ValueError, TypeError):
-                    pass
-        cb.record_success()
-        return df
+            cb.record_success()
+            return df
     except Exception as e:
         cb.record_failure(str(e))
         return pd.DataFrame()

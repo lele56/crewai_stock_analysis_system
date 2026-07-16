@@ -98,7 +98,7 @@ class FinancialCalculatorTool(BaseTool):
             return data
 
         try:
-            from src.tools.akshare_data_parser import get_financial_statements
+            from src.tools.akshare_data_parser import get_financial_statements, _safe_float
 
             result: dict[str, float] = {}
             for stype, sections in [("利润表", ["financials"]), ("资产负债表", ["balance_sheet"]), ("现金流量表", ["cashflow"])]:
@@ -106,22 +106,45 @@ class FinancialCalculatorTool(BaseTool):
                 if not df.empty:
                     record = df.iloc[0].to_dict()
                     for k, v in record.items():
-                        try:
-                            result[k] = float(v)
-                        except (ValueError, TypeError):
-                            pass
+                        val = _safe_float(v)
+                        if val is not None:
+                            result[k] = val
 
             _key_map = {
-                "营业总收入": "revenue", "营业收入": "revenue",
-                "净利润": "net_income",
-                "资产总计": "total_assets",
-                "股东权益": "equity",
-                "流动资产": "current_assets",
-                "流动负债": "current_liabilities",
-                "存货": "inventory",
-                "货币资金": "cash",
-                "负债合计": "total_debt",
-                "经营活动现金流量净额": "operating_cashflow",
+                # 利润表
+                "TOTAL_OPERATE_INCOME": "revenue", "OPERATE_INCOME": "revenue",
+                "NETPROFIT": "net_income", "PARENT_NETPROFIT": "net_income",
+                "OPERATE_PROFIT": "operating_profit",
+                "OPERATE_COST": "operating_cost",
+                "SALE_EXPENSE": "sale_expense",
+                "MANAGE_EXPENSE": "manage_expense",
+                "FINANCE_EXPENSE": "finance_expense",
+                "RESEARCH_EXPENSE": "research_expense",
+                "INTEREST_EXPENSE": "interest_expense",
+                "INCOME_TAX": "income_tax",
+                "TOTAL_OPERATE_COST": "total_operating_cost",
+                # 资产负债表
+                "ASSET_BALANCE": "total_assets",
+                "EQUITY_BALANCE": "equity",
+                "CURRENT_ASSET_BALANCE": "current_assets",
+                "CURRENT_LIAB_BALANCE": "current_liabilities",
+                "INVENTORY": "inventory",
+                "MONETARYFUNDS": "cash",
+                "LIAB_BALANCE": "total_debt",
+                "ACCOUNTS_RECE": "accounts_receivable",
+                "ACCOUNTS_PAYABLE": "accounts_payable",
+                "FIXED_ASSET": "fixed_assets",
+                "BORROW_FUND": "borrow_fund",
+                "SHORT_LOAN": "short_loan",
+                # 现金流量表
+                "NETCASH_OPERATE": "operating_cashflow",
+                "NETCASH_INVEST": "investing_cashflow",
+                "NETCASH_FINANCE": "financing_cashflow",
+                "TOTAL_OPERATE_INFLOW": "total_operating_inflow",
+                "TOTAL_OPERATE_OUTFLOW": "total_operating_outflow",
+                # 每股指标
+                "EPSJB": "eps",
+                "BPS": "bps",
             }
             for cn, en in _key_map.items():
                 if cn in result:
@@ -351,30 +374,22 @@ class FinancialCalculatorTool(BaseTool):
         return ratios
 
     def _generate_financial_report(self, results: dict) -> str:
-        """生成财务指标报告"""
-        report = "# 财务指标分析报告\n\n"
-        report += f"**分析时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
+        """生成财务指标报告（精简版，避免 LLM 上下文溢出）"""
+        lines = []
         for category, ratios in results.items():
-            report += f"## {category.replace('_', ' ').title()}\n\n"
-
             if not ratios:
-                report += "无可用数据\n\n"
                 continue
-
+            cat_name = category.replace("_", " ").title()
+            items = []
             for ratio_name, value in ratios.items():
-                ratio_name_chinese = self._translate_ratio_name(ratio_name)
-                if "growth" in ratio_name or "margin" in ratio_name or ratio_name in ["roa", "roe"]:
-                    report += f"- **{ratio_name_chinese}**: {value:.2f}%\n"
+                name = self._translate_ratio_name(ratio_name)
+                if "growth" in ratio_name or "margin" in ratio_name or ratio_name in ("roa", "roe"):
+                    items.append(f"{name}: {value:.2f}%")
                 else:
-                    report += f"- **{ratio_name_chinese}**: {value:.2f}\n"
-
-            report += "\n"
-
-        # 添加分析建议
-        report += self._generate_analysis_suggestions(results)
-
-        return report
+                    items.append(f"{name}: {value:.2f}")
+            if items:
+                lines.append(f"{cat_name}: " + ", ".join(items))
+        return "\n".join(lines) if lines else "无可用数据"
 
     def _translate_ratio_name(self, ratio_name: str) -> str:
         """翻译财务指标名称"""

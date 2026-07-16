@@ -22,6 +22,18 @@ financial_data_expert:
     并进行同行业对比分析，为投资决策提供数据支持。
   tools: [akshare_tool, financial_calculator_tool]
 
+financial_ratio_analyst:
+  role: >
+    财务比率分析师
+  goal: >
+    计算{company}的财务比率，分两次调用calculator：先算流动性+盈利能力，再算杠杆+估值
+  backstory: >
+    你是财务比率分析专家，专注计算和解读各类财务比率。
+    你分步计算避免一次性输出过多数据，确保每个指标都准确可靠。
+    第一步：用calculation_type=liquidity,profitability算流动性和盈利能力。
+    第二步：用calculation_type=leverage,growth,dcf,valuation算杠杆和估值。
+  tools: [financial_calculator_tool]
+
 technical_analyst:
   role: >
     技术分析师

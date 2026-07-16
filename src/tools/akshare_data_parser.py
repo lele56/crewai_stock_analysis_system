@@ -17,7 +17,7 @@ from src.tools.akshare_data_sources import (
     fill_industry_from_sina,
     fill_valuation_from_akshare,
     get_akshare_kline,
-    get_financial_data_ths,
+    get_financial_data_em,
     get_tencent_akshare_kline,
     get_tencent_kline,
     get_tickflow_kline,
@@ -86,12 +86,12 @@ def get_stock_history_data(ticker: str, period: str) -> pd.DataFrame:
 
 
 def get_financial_statements(ticker: str, statement_type: str) -> pd.DataFrame:
-    """获取财务报表（同花顺 → 断路器自动跳过故障源）"""
+    """获取财务报表（东方财富 → 纯HTTP，不依赖 py_mini_racer）"""
     try:
         code = ticker.replace("sh", "").replace("sz", "").replace("SH", "").replace("SZ", "")
 
-        if CircuitBreaker.get("ths_financial").allow_request():
-            df = get_financial_data_ths(code, statement_type)
+        if CircuitBreaker.get("em_financial").allow_request():
+            df = get_financial_data_em(code, statement_type)
             if not df.empty:
                 return df
 
@@ -109,53 +109,45 @@ def generate_stock_report(
     balance_sheet: pd.DataFrame,
     cashflow: pd.DataFrame,
 ) -> str:
-    """生成股票数据报告"""
-    report = f"# {ticker} 股票数据报告\n\n"
-    report += f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-    report += "## 基本信息\n\n"
-    report += f"- **公司名称**: {info.get('longName', 'N/A')}\n"
-    report += f"- **行业**: {info.get('industry', 'N/A')}\n"
+    """生成股票数据报告（精简版，适配所有模型）"""
+    lines = [f"{ticker} 股票数据:"]
+    company = info.get('longName', 'N/A')
+    industry = info.get('industry', 'N/A')
     mcap = info.get("marketCap", 0)
-    report += f"- **市值**: ¥{mcap:,.0f}\n" if mcap else "- **市值**: N/A\n"
     price = info.get("currentPrice", 0)
-    report += f"- **当前价格**: ¥{price:.2f}\n" if price else "- **当前价格**: N/A\n"
     high52 = info.get("fiftyTwoWeekHigh", 0)
     low52 = info.get("fiftyTwoWeekLow", 0)
-    report += f"- **52周最高**: ¥{high52:.2f}\n" if high52 else "- **52周最高**: N/A\n"
-    report += f"- **52周最低**: ¥{low52:.2f}\n\n" if low52 else "- **52周最低**: N/A\n\n"
+
+    basic = f"公司: {company}, 行业: {industry}"
+    if mcap and price:
+        basic += f", 市值: ¥{mcap:,.0f}, 价格: ¥{price:.2f}"
+    if high52 and low52:
+        basic += f", 52周区间: ¥{low52:.2f}-¥{high52:.2f}"
+    lines.append(basic)
+
     if not hist.empty:
-        report += "## 价格统计\n\n"
         current_price = hist["Close"].iloc[-1]
         period_return = ((current_price - hist["Close"].iloc[0]) / hist["Close"].iloc[0]) * 100
-        report += f"- **当前价格**: ¥{current_price:.2f}\n"
-        report += f"- **期间涨幅**: {period_return:.2f}%\n"
-        report += f"- **期间最高**: ¥{hist['High'].max():.2f}\n"
-        report += f"- **期间最低**: ¥{hist['Low'].min():.2f}\n"
-        report += f"- **平均成交额**: {hist['Volume'].mean():,.0f} 股\n\n"
-    report += "## 关键财务指标\n\n"
+        lines.append(f"价格: ¥{current_price:.2f}, 涨幅: {period_return:.2f}%, 最高: ¥{hist['High'].max():.2f}, 最低: ¥{hist['Low'].min():.2f}")
+
     financial_metrics = _extract_financial_metrics(info, financials)
-    for metric, value in financial_metrics.items():
-        report += f"- **{metric}**: {value}\n"
+    fm_items = [f"{k}: {v}" for k, v in financial_metrics.items()]
+    if fm_items:
+        lines.append("财务: " + ", ".join(fm_items))
+
     balance_metrics = _extract_balance_sheet_metrics(balance_sheet)
     if balance_metrics:
-        report += "\n### 资产负债表摘要\n\n"
-        for metric, value in balance_metrics.items():
-            report += f"- **{metric}**: {value}\n"
+        bm_items = [f"{k}: {v}" for k, v in balance_metrics.items()]
+        lines.append("资产负债表: " + ", ".join(bm_items))
+
     cashflow_metrics = _extract_cashflow_metrics(cashflow)
     if cashflow_metrics:
-        report += "\n### 现金流量表摘要\n\n"
-        for metric, value in cashflow_metrics.items():
-            report += f"- **{metric}**: {value}\n"
-    if not hist.empty:
-        report += "\n## 技术指标\n\n"
-        tech_indicators = _calculate_technical_indicators(hist)
-        for indicator, value in tech_indicators.items():
-            report += f"- **{indicator}**: {value}\n"
+        cm_items = [f"{k}: {v}" for k, v in cashflow_metrics.items()]
+        lines.append("现金流: " + ", ".join(cm_items))
 
-    # 缓存原始财务数据，后续工具可直接读取，无需重复调用 API
     _save_stock_cache(ticker, hist, financials, balance_sheet, cashflow, info)
 
-    return report
+    return "\n".join(lines)
 
 
 # ── 股票数据缓存（三层：内存 → Redis → 文件）─────────────────
@@ -441,23 +433,48 @@ def load_financial_from_cache(ticker: str) -> dict:
             row = records[0]
             for k, v in row.items():
                 if v is not None and k not in ("index", "Date"):
-                    try:
-                        result[k] = float(v)
-                    except (ValueError, TypeError):
-                        pass
+                    val = _safe_float(v)
+                    if val is not None:
+                        result[k] = val
 
-    # 映射为标准 key
+    # 映射为标准 key（东方财富英文列名）
     _key_map = {
-        "营业总收入": "revenue", "营业收入": "revenue",
-        "净利润": "net_income",
-        "资产总计": "total_assets",
-        "股东权益": "equity",
-        "流动资产": "current_assets",
-        "流动负债": "current_liabilities",
-        "存货": "inventory",
-        "货币资金": "cash",
-        "负债合计": "total_debt",
-        "经营活动现金流量净额": "operating_cashflow",
+        # 利润表
+        "TOTAL_OPERATE_INCOME": "revenue", "OPERATE_INCOME": "revenue",
+        "NETPROFIT": "net_income", "PARENT_NETPROFIT": "net_income",
+        "OPERATE_PROFIT": "operating_profit",
+        "OPERATE_COST": "operating_cost",
+        "SALE_EXPENSE": "sale_expense",
+        "MANAGE_EXPENSE": "manage_expense",
+        "FINANCE_EXPENSE": "finance_expense",
+        "RESEARCH_EXPENSE": "research_expense",
+        "INTEREST_EXPENSE": "interest_expense",
+        "INCOME_TAX": "income_tax",
+        "TOTAL_OPERATE_COST": "total_operating_cost",
+        # 资产负债表
+        "ASSET_BALANCE": "total_assets",
+        "EQUITY_BALANCE": "equity",
+        "CURRENT_ASSET_BALANCE": "current_assets",
+        "CURRENT_LIAB_BALANCE": "current_liabilities",
+        "INVENTORY": "inventory",
+        "MONETARYFUNDS": "cash",
+        "LIAB_BALANCE": "total_debt",
+        "ACCOUNTS_RECE": "accounts_receivable",
+        "ACCOUNTS_PAYABLE": "accounts_payable",
+        "FIXED_ASSET": "fixed_assets",
+        "GOODWILL": "goodwill",
+        "SHORT_LOAN": "short_loan",
+        "LONG_LOAN": "long_loan",
+        "BORROW_FUND": "borrow_fund",
+        # 现金流量表
+        "NETCASH_OPERATE": "operating_cashflow",
+        "NETCASH_INVEST": "investing_cashflow",
+        "NETCASH_FINANCE": "financing_cashflow",
+        "TOTAL_OPERATE_INFLOW": "total_operating_inflow",
+        "TOTAL_OPERATE_OUTFLOW": "total_operating_outflow",
+        # 每股指标
+        "EPSJB": "eps",
+        "BPS": "bps",
     }
     for cn, en in _key_map.items():
         if cn in result:
@@ -481,6 +498,14 @@ def _safe_float(val) -> float | None:
         return None
 
 
+def _find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    """在 DataFrame 中查找第一个存在的列名"""
+    for col in candidates:
+        if col in df.columns:
+            return col
+    return None
+
+
 def _extract_financial_metrics(info: dict, financials: pd.DataFrame) -> dict[str, str]:
     metrics = {
         "市盈率": f"{info.get('trailingPE', 'N/A')}",
@@ -491,25 +516,25 @@ def _extract_financial_metrics(info: dict, financials: pd.DataFrame) -> dict[str
     }
     if not financials.empty:
         try:
-            _rev_col = None
-            for _col in ["营业总收入", "营业收入"]:
-                if _col in financials.columns:
-                    _rev_col = _col
-                    break
-            if _rev_col and len(financials) > 0:
-                rev = _safe_float(financials[_rev_col].iloc[0])
+            rev_col = _find_column(financials, ["TOTAL_OPERATE_INCOME", "OPERATE_INCOME"])
+            if rev_col and len(financials) > 0:
+                rev = _safe_float(financials[rev_col].iloc[0])
                 metrics["最新营收"] = f"{rev:,.2f} 元" if rev else "N/A"
-            if "净利润" in financials.columns and len(financials) > 0:
-                np_val = _safe_float(financials["净利润"].iloc[0])
+
+            np_col = _find_column(financials, ["NETPROFIT", "PARENT_NETPROFIT"])
+            if np_col and len(financials) > 0:
+                np_val = _safe_float(financials[np_col].iloc[0])
                 metrics["最新净利润"] = f"{np_val:,.2f} 元" if np_val else "N/A"
-            for _col in ["营业利润", "营业总收入", "营业收入"]:
-                if _col in financials.columns and len(financials) > 0:
-                    op_val = _safe_float(financials[_col].iloc[0])
-                    metrics["营业利润"] = f"{op_val:,.2f} 元" if op_val else "N/A"
-                    break
-            if _rev_col and "营业成本" in financials.columns and len(financials) > 0:
-                revenue = _safe_float(financials[_rev_col].iloc[0])
-                cost = _safe_float(financials["营业成本"].iloc[0])
+
+            op_col = _find_column(financials, ["OPERATE_PROFIT"])
+            if op_col and len(financials) > 0:
+                op_val = _safe_float(financials[op_col].iloc[0])
+                metrics["营业利润"] = f"{op_val:,.2f} 元" if op_val else "N/A"
+
+            cost_col = _find_column(financials, ["OPERATE_COST"])
+            if rev_col and cost_col and len(financials) > 0:
+                revenue = _safe_float(financials[rev_col].iloc[0])
+                cost = _safe_float(financials[cost_col].iloc[0])
                 if revenue and cost and revenue > 0:
                     metrics["毛利率"] = f"{((revenue - cost) / revenue) * 100:.2f}%"
         except Exception as e:
@@ -523,10 +548,20 @@ def _extract_balance_sheet_metrics(balance_sheet: pd.DataFrame) -> dict[str, str
     if balance_sheet.empty:
         return metrics
     try:
-        for col in ["流动资产", "流动负债", "资产总计", "负债合计", "存货", "货币资金", "股东权益"]:
-            if col in balance_sheet.columns and len(balance_sheet) > 0:
+        col_map = {
+            "流动资产": ["CURRENT_ASSET_BALANCE"],
+            "流动负债": ["CURRENT_LIAB_BALANCE"],
+            "资产总计": ["ASSET_BALANCE"],
+            "负债合计": ["LIAB_BALANCE"],
+            "存货": ["INVENTORY"],
+            "货币资金": ["MONETARYFUNDS"],
+            "股东权益": ["EQUITY_BALANCE"],
+        }
+        for metric_name, col_names in col_map.items():
+            col = _find_column(balance_sheet, col_names)
+            if col and len(balance_sheet) > 0:
                 val = _safe_float(balance_sheet[col].iloc[0])
-                metrics[col] = f"{val:,.2f} 元" if val else "N/A"
+                metrics[metric_name] = f"{val:,.2f} 元" if val else "N/A"
     except Exception as e:
         logger.debug(f"提取资产负债表指标时出错: {str(e)[:50]}")
     return metrics
@@ -538,10 +573,16 @@ def _extract_cashflow_metrics(cashflow: pd.DataFrame) -> dict[str, str]:
     if cashflow.empty:
         return metrics
     try:
-        for col in ["经营活动现金流量净额", "投资活动现金流量净额", "筹资活动现金流量净额"]:
-            if col in cashflow.columns and len(cashflow) > 0:
+        col_map = {
+            "经营活动现金流量净额": ["NETCASH_OPERATE"],
+            "投资活动现金流量净额": ["NETCASH_INVEST"],
+            "筹资活动现金流量净额": ["NETCASH_FINANCE"],
+        }
+        for metric_name, col_names in col_map.items():
+            col = _find_column(cashflow, col_names)
+            if col and len(cashflow) > 0:
                 val = _safe_float(cashflow[col].iloc[0])
-                metrics[col] = f"{val:,.2f} 元" if val else "N/A"
+                metrics[metric_name] = f"{val:,.2f} 元" if val else "N/A"
     except Exception as e:
         logger.debug(f"提取现金流量表指标时出错: {str(e)[:50]}")
     return metrics

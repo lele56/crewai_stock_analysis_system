@@ -3,15 +3,6 @@
 通过 akshare 获取真实 A 股市场数据，数据源不可用时降级为通用描述
 """
 
-import sys
-import types
-
-# 阻止 py_mini_racer，避免 Windows 上 V8 内存冲突
-if "py_mini_racer" not in sys.modules:
-    _fm = types.ModuleType("py_mini_racer")
-    _fm.MiniRacer = type("_FakeMiniRacer", (), {"__init__": lambda *a, **k: None, "__call__": lambda *a, **k: None})()
-    sys.modules["py_mini_racer"] = _fm
-
 from datetime import datetime
 import logging
 
@@ -26,7 +17,7 @@ try:
 except ImportError:
     pass
 
-# A 股主要指数代码 (akshare stock_zh_index_daily 使用)
+# A 股主要指数代码
 _A_INDEX_MAP = {
     "上证指数": "sh000001",
     "深证成指": "sz399001",
@@ -36,11 +27,21 @@ _A_INDEX_MAP = {
     "中证500": "sh000905",
 }
 
+_INDEX_CACHE: dict[str, dict] = {}
+_INDEX_CACHE_TS = 0.0
+_INDEX_CACHE_TTL = 300  # 5 分钟
+
 
 def _fetch_index_data() -> dict[str, dict]:
-    """通过 akshare 获取 A 股主要指数最新行情（日线取最新一条，避开被封锁的实时接口）
+    """获取 A 股主要指数最新行情（5 分钟缓存）
     主源: stock_zh_index_daily → 替补: stock_zh_index_daily_tx (腾讯)
     """
+    global _INDEX_CACHE, _INDEX_CACHE_TS
+
+    now = datetime.now().timestamp()
+    if _INDEX_CACHE and (now - _INDEX_CACHE_TS) < _INDEX_CACHE_TTL:
+        return _INDEX_CACHE
+
     if not _AKSHARE_AVAILABLE:
         return {}
     from src.tools.akshare_data_sources import get_index_daily_tx
@@ -65,10 +66,12 @@ def _fetch_index_data() -> dict[str, dict]:
                     }
             except Exception:
                 continue
+        _INDEX_CACHE = result
+        _INDEX_CACHE_TS = now
         return result
     except Exception as e:
         logger.debug(f"获取指数行情失败: {str(e)[:80]}")
-        return {}
+        return _INDEX_CACHE or {}
 
 
 def _fetch_sector_data() -> list[dict]:
@@ -129,67 +132,27 @@ class MarketDataTool(BaseTool):
             return error_msg
 
     def _get_market_overview(self) -> str:
-        """获取市场概览 - 优先使用 akshare 真实数据"""
-        report = "# 市场概览\n\n"
-        report += f"**更新时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
+        """获取市场概览 - 优先使用 akshare 真实数据（精简版）"""
         index_data = _fetch_index_data()
         if index_data:
-            report += "## A 股主要指数\n\n"
+            parts = []
             for name, data in index_data.items():
-                direction = "📈" if data["change_pct"] >= 0 else "📉"
                 sign = "+" if data["change_pct"] >= 0 else ""
-                report += (
-                    f"- **{name}**: {data['price']:.2f} "
-                    f"({direction} {sign}{data['change_pct']:.2f}%) "
-                    f"- 成交额: {_format_amount(data['amount'])}\n"
-                )
-            report += "\n"
-        else:
-            report += (
-                "## 市场数据\n\n"
-                "> 实时数据源暂时不可用（akshare 未安装或网络异常），"
-                "请参考各股票详情页获取最新行情。\n\n"
-            )
-
-        report += "## 市场状态\n\n"
-        report += "- **市场情绪**: 请参考各指数最新涨跌判断\n"
-        report += "- **波动率**: 请参考 A 股波动率指数\n"
-        report += "- **资金流向**: 请参考北向资金和主力资金数据\n"
-        return report
+                parts.append(f"{name}: {data['price']:.2f}({sign}{data['change_pct']:.2f}%)")
+            return "市场概览: " + ", ".join(parts)
+        return "市场概览: 数据源不可用"
 
     def _get_sector_performance(self) -> str:
-        """获取行业表现 - 优先使用 akshare 真实数据"""
-        report = "# 行业表现分析\n\n"
-        report += f"**更新时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
+        """获取行业表现 - 优先使用 akshare 真实数据（精简版）"""
         sectors = _fetch_sector_data()
         if sectors:
-            report += "## 今日板块涨跌排行\n\n"
+            parts = []
             for s in sectors:
-                direction = "📈" if s["change_pct"] >= 0 else "📉"
                 sign = "+" if s["change_pct"] >= 0 else ""
-                report += f"- **{s['name']}**: {direction} {sign}{s['change_pct']:.2f}%\n"
-        else:
-            report += (
-                "> 实时板块数据暂时不可用。请使用 search 工具查询最新行业动态。\n\n"
-                "A 股主要行业板块包括：白酒、新能源、半导体、医药、银行、地产等。\n"
-            )
-        return report
+                parts.append(f"{s['name']}: {sign}{s['change_pct']:.2f}%")
+            return "行业表现: " + ", ".join(parts)
+        return "行业表现: 数据源不可用"
 
     def _get_market_sentiment(self) -> str:
-        """获取市场情绪"""
-        report = "# 市场情绪分析\n\n"
-        report += f"**分析时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-        report += "## 情绪指标\n\n"
-        report += "- **北向资金**: 请参考当日沪深港通数据\n"
-        report += "- **融资融券**: 请参考两融余额变化\n"
-        report += "- **涨停/跌停比**: 请参考当日涨跌停统计\n"
-        report += "- **成交量**: 请参考当日两市成交额\n"
-        report += "\n## 情绪分析\n\n"
-        report += (
-            "市场情绪需结合指数涨跌、成交量变化、北向资金流向、"
-            "涨停家数等多维度指标综合判断。建议使用 akshare 工具"
-            "获取具体数据进行分析。\n"
-        )
-        return report
+        """获取市场情绪（精简版）"""
+        return "市场情绪: 请结合指数涨跌、成交量变化、北向资金流向、融资融券余额、涨跌停家数等维度综合判断"

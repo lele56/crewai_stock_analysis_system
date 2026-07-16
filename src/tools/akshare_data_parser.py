@@ -323,7 +323,11 @@ def _save_stock_cache(
         def _df_to_records(df: pd.DataFrame) -> list[dict]:
             if df.empty:
                 return []
-            return df.reset_index().to_dict(orient="records")
+            df = df.reset_index()
+            for col in df.columns:
+                if pd.api.types.is_datetime64_any_dtype(df[col]):
+                    df[col] = df[col].astype(str)
+            return df.to_dict(orient="records")
 
         cache = {
             "ticker": ticker,

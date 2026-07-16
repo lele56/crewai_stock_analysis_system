@@ -502,6 +502,12 @@ def get_financial_data_ths(code: str, statement_type: str = "all") -> pd.DataFra
         import akshare as ak
 
         df = ak.stock_financial_abstract_ths(symbol=code, indicator="按年度")
+        if not df.empty:
+            for col in df.columns:
+                try:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+                except (ValueError, TypeError):
+                    pass
         cb.record_success()
         return df
     except Exception as e:

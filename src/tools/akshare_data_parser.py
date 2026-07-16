@@ -262,11 +262,15 @@ def _validate_stock_data(
             revenue = 0.0
             for col in ["营业总收入", "营业收入"]:
                 if col in financials.columns:
-                    revenue = financials[col].iloc[0] or 0
+                    rv = _safe_float(financials[col].iloc[0])
+                    if rv:
+                        revenue = rv
                     break
             total_assets = 0.0
             if "资产总计" in balance_sheet.columns:
-                total_assets = balance_sheet["资产总计"].iloc[0] or 0
+                ta = _safe_float(balance_sheet["资产总计"].iloc[0])
+                if ta:
+                    total_assets = ta
             if revenue > 0 and total_assets == 0:
                 logger.warning(
                     f"缓存校验 [{name}]: 营收={revenue} 但资产总计=0，数据矛盾"
@@ -463,6 +467,16 @@ def load_financial_from_cache(ticker: str) -> dict:
     return result
 
 
+def _safe_float(val) -> float | None:
+    """安全地将值转为 float，无法转换时返回 None"""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    try:
+        return float(str(val).replace(",", "").replace("亿", "e8").replace("万", "e4").replace("元", ""))
+    except (ValueError, TypeError):
+        return None
+
+
 def _extract_financial_metrics(info: dict, financials: pd.DataFrame) -> dict[str, str]:
     metrics = {
         "市盈率": f"{info.get('trailingPE', 'N/A')}",
@@ -479,16 +493,20 @@ def _extract_financial_metrics(info: dict, financials: pd.DataFrame) -> dict[str
                     _rev_col = _col
                     break
             if _rev_col and len(financials) > 0:
-                metrics["最新营收"] = f"{financials[_rev_col].iloc[0]:,.2f} 元"
+                rev = _safe_float(financials[_rev_col].iloc[0])
+                metrics["最新营收"] = f"{rev:,.2f} 元" if rev else "N/A"
             if "净利润" in financials.columns and len(financials) > 0:
-                metrics["最新净利润"] = f"{financials['净利润'].iloc[0]:,.2f} 元"
+                np_val = _safe_float(financials["净利润"].iloc[0])
+                metrics["最新净利润"] = f"{np_val:,.2f} 元" if np_val else "N/A"
             for _col in ["营业利润", "营业总收入", "营业收入"]:
                 if _col in financials.columns and len(financials) > 0:
-                    metrics["营业利润"] = f"{financials[_col].iloc[0]:,.2f} 元"
+                    op_val = _safe_float(financials[_col].iloc[0])
+                    metrics["营业利润"] = f"{op_val:,.2f} 元" if op_val else "N/A"
                     break
             if _rev_col and "营业成本" in financials.columns and len(financials) > 0:
-                revenue, cost = financials[_rev_col].iloc[0], financials["营业成本"].iloc[0]
-                if revenue > 0:
+                revenue = _safe_float(financials[_rev_col].iloc[0])
+                cost = _safe_float(financials["营业成本"].iloc[0])
+                if revenue and cost and revenue > 0:
                     metrics["毛利率"] = f"{((revenue - cost) / revenue) * 100:.2f}%"
         except Exception as e:
             logger.debug(f"提取财务指标时出错: {str(e)[:50]}")
@@ -503,8 +521,8 @@ def _extract_balance_sheet_metrics(balance_sheet: pd.DataFrame) -> dict[str, str
     try:
         for col in ["流动资产", "流动负债", "资产总计", "负债合计", "存货", "货币资金", "股东权益"]:
             if col in balance_sheet.columns and len(balance_sheet) > 0:
-                val = balance_sheet[col].iloc[0]
-                metrics[col] = f"{val:,.2f} 元" if pd.notna(val) else "N/A"
+                val = _safe_float(balance_sheet[col].iloc[0])
+                metrics[col] = f"{val:,.2f} 元" if val else "N/A"
     except Exception as e:
         logger.debug(f"提取资产负债表指标时出错: {str(e)[:50]}")
     return metrics
@@ -518,8 +536,8 @@ def _extract_cashflow_metrics(cashflow: pd.DataFrame) -> dict[str, str]:
     try:
         for col in ["经营活动现金流量净额", "投资活动现金流量净额", "筹资活动现金流量净额"]:
             if col in cashflow.columns and len(cashflow) > 0:
-                val = cashflow[col].iloc[0]
-                metrics[col] = f"{val:,.2f} 元" if pd.notna(val) else "N/A"
+                val = _safe_float(cashflow[col].iloc[0])
+                metrics[col] = f"{val:,.2f} 元" if val else "N/A"
     except Exception as e:
         logger.debug(f"提取现金流量表指标时出错: {str(e)[:50]}")
     return metrics

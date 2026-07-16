@@ -1,0 +1,149 @@
+# ruff.toml — 项目代码规范配置
+target-version = "py311"
+
+# 行宽
+line-length = 120
+
+# 排除目录
+exclude = [
+    ".git",
+    ".trae",
+    "__pycache__",
+    ".pytest_cache",
+    "venv",
+    ".venv",
+    "env",
+    "data",
+    "cache",
+    "reports",
+    "exports",
+]
+
+# ── 启用的规则集 ──────────────────────────────
+[lint]
+select = [
+    # pyflakes: 基础错误检测（未使用 import、未定义变量等）
+    "F",
+    # pycodestyle: 代码风格（E722 裸 except 等）
+    "E",
+    # isort: import 排序和分组
+    "I",
+    # pydocstyle: 文档字符串
+    "D",
+    # flake8-annotations: 类型注解
+    "ANN",
+    # flake8-bugbear: 常见 bug 检测
+    "B",
+    # flake8-simplify: 简化代码建议
+    "SIM",
+    # flake8-comprehensions: 推导式优化
+    "C4",
+    # pyupgrade: 现代语法建议
+    "UP",
+    # flake8-return: 检查 return 语句
+    "RET",
+    # flake8-raise: 检查 raise 语句
+    "RSE",
+    # flake8-tidy-imports: 禁止特定导入
+    "TID",
+]
+
+# 忽略的规则
+ignore = [
+    # D100: 模块级 docstring 已有路径注释替代
+    "D100",
+    # D104: 包 __init__.py 不强制 docstring
+    "D104",
+    # D105: 魔术方法不强制 docstring
+    "D105",
+    # D107: __init__ 方法不强制 docstring
+    "D107",
+    # D203/D213: 与 D212 冲突（多行 docstring 风格）
+    "D203",
+    "D213",
+    # D205: 首行摘要后空行
+    "D205",
+    # D415: 首行必须以句号结尾（中文项目不适用）
+    "D415",
+    # ANN101: self 不需要类型注解
+    "ANN101",
+    # ANN102: cls 不需要类型注解
+    "ANN102",
+    # ANN401: Any 类型允许（动态分析场景需要）
+    "ANN401",
+]
+
+# ── 针对测试文件的规则放宽 ────────────────────
+[lint.per-file-ignores]
+"tests/*.py" = [
+    "ANN001",  # 测试函数参数不需要类型注解
+    "ANN201",  # 测试函数返回值不需要类型注解
+    "D103",    # 测试函数 docstring 放宽
+    "D101",    # 测试类 docstring 放宽
+    "D102",    # 测试方法 docstring 放宽
+    "E501",    # 测试数据行长
+]
+"scripts/*.py" = [
+    "D103",    # 脚本函数 docstring 放宽
+    "ANN001",  # 脚本函数参数类型注解放宽
+    "ANN201",  # 脚本函数返回值类型注解放宽
+    "D102",    # 脚本方法 docstring 放宽
+    "E501",    # 脚本行长放宽
+    "SIM115",  # 脚本文件打开方式放宽
+    "E741",    # 脚本变量名放宽
+]
+"web/*.py" = [
+    "D103",    # Web 路由函数 docstring 放宽（FastAPI 自动生成文档）
+    "ANN001",  # Web 路由参数类型注解放宽
+    "ANN201",  # Web 路由返回值类型注解放宽
+    "ANN202",  # Web 路由私有函数返回值类型注解放宽
+    "D101",    # Web 请求模型类 docstring 放宽
+    "D102",    # Web 路由方法 docstring 放宽
+    "E402",    # load_dotenv() 必须在导入前执行
+    "E501",    # HTML 模板字符串行长大
+]
+"main.py" = [
+    "D103",    # 入口函数 docstring 放宽
+    "E402",    # 入口文件导入顺序
+    "ANN201",  # 入口函数返回值类型注解放宽
+]
+"run_tests.py" = [
+    "D103",    # 测试入口 docstring 放宽
+    "ANN201",  # 测试入口返回值类型注解放宽
+    "ANN001",  # 测试入口参数类型注解放宽
+]
+"src/tools/fundamental_tools.py" = [
+    "E501",    # 长 f-string 模板行
+]
+"src/tools/technical_indicators.py" = [
+    "E501",    # 长 f-string 模板行
+]
+"src/tools/technical_tools.py" = [
+    "E501",    # 长 f-string 模板行
+]
+"src/tools/communication_tools.py" = [
+    "E501",    # 长 f-string 模板行
+]
+"src/tools/market_data_tool.py" = [
+    "E501",    # 长 f-string 模板行
+]
+"src/tools/akshare_data_sources.py" = [
+    "E501",    # 长 f-string 模板行
+]
+
+# ── isort 配置 ─────────────────────────────────
+[lint.isort]
+known-first-party = ["src"]
+known-third-party = ["crewai"]
+force-sort-within-sections = true
+lines-between-types = 1
+
+# ── pydocstyle 配置 ────────────────────────────
+[lint.pydocstyle]
+convention = "google"
+
+# ── 格式化配置 ─────────────────────────────────
+[format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true

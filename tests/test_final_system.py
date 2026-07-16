@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # tests/test_final_system.py
-"""
-最终系统测试
+"""最终系统测试
 验证完整的股票分析系统功能
 """
 
-import sys
-import os
 from datetime import datetime
+import os
+import sys
 
 # 添加src目录到路径
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
+
 
 def test_basic_imports():
     """测试基本导入"""
@@ -18,23 +18,15 @@ def test_basic_imports():
 
     try:
         # 测试系统核心导入
-        from stock_analysis_system import StockAnalysisSystem
         print("✅ StockAnalysisSystem 导入成功")
 
         # 测试Crews导入
-        from crews.data_collection_crew import DataCollectionCrew
-        from crews.analysis_crew import AnalysisCrew
-        from crews.decision_crew import DecisionCrew
         print("✅ Crews 导入成功")
 
         # 测试Flows导入
-        from flows.investment_flow import SmartInvestmentFlow
-        from flows.batch_analysis_flow import BatchAnalysisFlow
         print("✅ Flows 导入成功")
 
         # 测试工具导入
-        from utils.batch_analyzer import BatchStockAnalyzer
-        from utils.monitor import StockMonitor
         print("✅ 工具导入成功")
 
         return True
@@ -42,6 +34,7 @@ def test_basic_imports():
     except Exception as e:
         print(f"❌ 导入失败: {str(e)}")
         return False
+
 
 def test_system_initialization():
     """测试系统初始化"""
@@ -55,10 +48,10 @@ def test_system_initialization():
         print("✅ 系统实例创建成功")
 
         # 验证组件
-        assert hasattr(system, 'data_collection_crew'), "缺少数据收集团队"
-        assert hasattr(system, 'analysis_crew'), "缺少分析团队"
-        assert hasattr(system, 'decision_crew'), "缺少决策团队"
-        assert hasattr(system, 'cache'), "缺少缓存系统"
+        assert hasattr(system, "data_collection_crew"), "缺少数据收集团队"
+        assert hasattr(system, "analysis_crew"), "缺少分析团队"
+        assert hasattr(system, "decision_crew"), "缺少决策团队"
+        assert hasattr(system, "cache"), "缺少缓存系统"
         print("✅ 系统组件验证通过")
 
         return True
@@ -67,13 +60,14 @@ def test_system_initialization():
         print(f"❌ 系统初始化失败: {str(e)}")
         return False
 
+
 def test_flows_initialization():
     """测试Flows初始化"""
     print("\n🔍 测试Flows初始化...")
 
     try:
-        from flows.investment_flow import SmartInvestmentFlow
         from flows.batch_analysis_flow import BatchAnalysisFlow
+        from flows.investment_flow import SmartInvestmentFlow
 
         # 创建Flow实例
         investment_flow = SmartInvestmentFlow()
@@ -81,8 +75,8 @@ def test_flows_initialization():
         print("✅ Flow实例创建成功")
 
         # 验证Flow类
-        assert hasattr(investment_flow, 'data_collection_crew'), "缺少数据收集团队"
-        assert hasattr(batch_flow, 'batch_analyzer'), "缺少批量分析器"
+        assert hasattr(investment_flow, "data_collection_crew"), "缺少数据收集团队"
+        assert hasattr(batch_flow, "batch_analyzer"), "缺少批量分析器"
         print("✅ Flow组件验证通过")
 
         return True
@@ -90,6 +84,7 @@ def test_flows_initialization():
     except Exception as e:
         print(f"❌ Flows初始化失败: {str(e)}")
         return False
+
 
 def test_tools_initialization():
     """测试工具初始化"""
@@ -105,8 +100,8 @@ def test_tools_initialization():
         print("✅ 工具实例创建成功")
 
         # 验证工具属性
-        assert hasattr(analyzer, 'analysis_system'), "批量分析器缺少分析系统"
-        assert hasattr(monitor, 'monitoring_stocks'), "监控器缺少监控列表"
+        assert hasattr(analyzer, "analysis_system"), "批量分析器缺少分析系统"
+        assert hasattr(monitor, "monitoring_stocks"), "监控器缺少监控列表"
         print("✅ 工具属性验证通过")
 
         return True
@@ -114,6 +109,7 @@ def test_tools_initialization():
     except Exception as e:
         print(f"❌ 工具初始化失败: {str(e)}")
         return False
+
 
 def test_configuration_files():
     """测试配置文件"""
@@ -124,17 +120,17 @@ def test_configuration_files():
 
         # 测试YAML配置文件
         config_files = [
-            'config/agents.yaml',
-            'config/tasks.yaml',
+            "config/agents.yaml",
+            "config/tasks.yaml",
         ]
 
         for config_file in config_files:
-            with open(config_file, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
+            with open(config_file, encoding="utf-8") as f:
+                yaml.safe_load(f)
             print(f"✅ {config_file} 加载成功")
 
         # 测试环境配置
-        if os.path.exists('.env'):
+        if os.path.exists(".env"):
             print("✅ .env 文件存在")
         else:
             print("⚠️ .env 文件不存在（需要配置API密钥）")
@@ -145,13 +141,14 @@ def test_configuration_files():
         print(f"❌ 配置文件测试失败: {str(e)}")
         return False
 
+
 def test_web_app_structure():
     """测试Web应用结构"""
     print("\n🔍 测试Web应用结构...")
 
     try:
         # 检查Web应用文件
-        web_app_path = 'web/web_app.py'
+        web_app_path = "web/web_app.py"
         if os.path.exists(web_app_path):
             print("✅ Web应用文件存在")
         else:
@@ -160,6 +157,7 @@ def test_web_app_structure():
 
         # 检查Web应用导入
         import importlib.util
+
         spec = importlib.util.spec_from_file_location("web_app", web_app_path)
         if spec and spec.loader:
             print("✅ Web应用模块加载成功")
@@ -173,11 +171,12 @@ def test_web_app_structure():
         print(f"❌ Web应用测试失败: {str(e)}")
         return False
 
+
 def generate_test_report():
     """生成测试报告"""
     print("\n📊 生成测试报告...")
 
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     report = f"""
 # 股票分析系统测试报告
@@ -247,11 +246,12 @@ result = system.analyze_stock("苹果公司", "AAPL")
 """
 
     # 保存报告
-    with open('FINAL_TEST_REPORT.md', 'w', encoding='utf-8') as f:
+    with open("FINAL_TEST_REPORT.md", "w", encoding="utf-8") as f:
         f.write(report)
 
     print("✅ 测试报告已生成: FINAL_TEST_REPORT.md")
     return report
+
 
 def main():
     """主测试函数"""
@@ -264,7 +264,7 @@ def main():
         test_flows_initialization,
         test_tools_initialization,
         test_configuration_files,
-        test_web_app_structure
+        test_web_app_structure,
     ]
 
     passed = 0
@@ -281,7 +281,7 @@ def main():
         print("🎉 所有测试通过！系统可以正常运行。")
 
         # 生成测试报告
-        report = generate_test_report()
+        generate_test_report()
         print("\n📋 系统已准备就绪:")
         print("✅ CrewAI多Agent协作架构")
         print("✅ Crews模式和Flows模式")
@@ -292,9 +292,9 @@ def main():
         print("✅ 命令行界面")
 
         return True
-    else:
-        print("❌ 部分测试失败，请检查上述错误。")
-        return False
+    print("❌ 部分测试失败，请检查上述错误。")
+    return False
+
 
 if __name__ == "__main__":
     success = main()

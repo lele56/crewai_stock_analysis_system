@@ -1,8 +1,9 @@
 # scripts/add_path_comment.py
 """给项目中所有源文件第一行添加路径注释"""
+
 import os
-import sys
 from pathlib import Path
+import sys
 
 PROJECT_ROOT = Path(__file__).parent
 
@@ -12,10 +13,9 @@ def get_comment_style(file_path: str) -> str:
     ext = Path(file_path).suffix.lower()
     if ext in (".py", ".yaml", ".yml", ".txt", ".cfg", ".ini", ".toml", ".env", ".example"):
         return "#", ""
-    elif ext in (".html", ".md"):
+    if ext in (".html", ".md"):
         return "<!--", " -->"
-    else:
-        return None, None
+    return None, None
 
 
 def add_path_comment(file_path: str, dry_run: bool = False) -> bool:
@@ -25,7 +25,7 @@ def add_path_comment(file_path: str, dry_run: bool = False) -> bool:
         return False
 
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             content = f.read()
     except Exception:
         return False
@@ -44,7 +44,7 @@ def add_path_comment(file_path: str, dry_run: bool = False) -> bool:
     # 如果第一行是旧的路径注释，替换为新路径
     if first_line.startswith(prefix) and str(PROJECT_ROOT) in first_line:
         lines = content.split("\n", 1)
-        content = (lines[1] if len(lines) > 1 else "")
+        content = lines[1] if len(lines) > 1 else ""
 
     # 如果第一行是 shebang，插入到第二行
     elif first_line.startswith("#!") or first_line.startswith("#!/"):

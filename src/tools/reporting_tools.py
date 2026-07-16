@@ -1,44 +1,62 @@
 # src/tools/reporting_tools.py
-"""
-报告生成工具
+"""报告生成工具
 支持多种报告格式：Markdown、JSON、HTML、Word(docx)、CSV
 """
-from crewai.tools import BaseTool as CrewAIBaseTool
-from typing import Dict, Any, List, Optional
-import json
-import os
+
 from datetime import datetime
+import json
 import logging
+import os
+from typing import Any
+
+from crewai.tools import BaseTool as CrewAIBaseTool
 
 from src.tools.report_templates import ReportTemplates
-from src.config import Config
 
 logger = logging.getLogger(__name__)
 
 
 class BaseTool(CrewAIBaseTool):
     """工具基类"""
+
     name: str = "Base Tool"
     description: str = "基础工具类"
 
-    def _run(self, *args, **kwargs):
+    def _run(self, *args: Any, **kwargs: Any) -> str:
         raise NotImplementedError("子类必须实现_run方法")
 
 
 class ReportWritingTool(BaseTool):
-    """报告编写工具"""
+    """报告编写工具 — 只传短字段，不传大段文本，避免 JSON 解析失败"""
 
     name: str = "Report Writing Tool"
-    description: str = "生成标准化的投资分析报告和文档"
+    description: str = (
+        "生成标准化的投资分析报告。所有参数必须传短字符串（50字以内），不要传大段文本。"
+        "参数: company(公司名), ticker(代码), scores(评分JSON), recommendation(投资建议), "
+        "summary(一句话摘要), report_type(investment_analysis/summary/executive_brief)"
+    )
 
-    def _run(self, report_data: str, report_type: str = "investment_analysis") -> str:
+    def _run(
+        self,
+        company: str = "",
+        ticker: str = "",
+        scores: str = "",
+        recommendation: str = "",
+        summary: str = "",
+        report_type: str = "investment_analysis",
+    ) -> str:
         try:
-            logger.info(f"生成报告，类型: {report_type}")
-            try:
-                data = json.loads(report_data)
-            except json.JSONDecodeError as e:
-                logger.warning(f"JSON解析失败，尝试作为纯文本处理: {str(e)[:80]}")
-                data = {"raw_content": report_data}
+            logger.info(f"生成报告，类型: {report_type}, 公司: {company}")
+
+            score_dict = self._safe_parse_json(scores)
+            data = {
+                "company": company,
+                "ticker": ticker,
+                "scores": score_dict,
+                "recommendation": recommendation,
+                "summary": summary,
+            }
+
             if report_type == "investment_analysis":
                 report = self._generate_investment_analysis_report(data)
             elif report_type == "summary":
@@ -46,7 +64,7 @@ class ReportWritingTool(BaseTool):
             elif report_type == "executive_brief":
                 report = self._generate_executive_brief(data)
             elif report_type == "detailed":
-                report = self._generate_detailed_report(data)
+                report = self._generate_investment_analysis_report(data)
             else:
                 report = self._generate_generic_report(data)
             logger.info("报告生成完成")
@@ -56,114 +74,146 @@ class ReportWritingTool(BaseTool):
             logger.error(error_msg)
             return error_msg
 
-    def _generate_investment_analysis_report(self, data: Dict) -> str:
+    @staticmethod
+    def _safe_parse_json(raw: str) -> dict:
+        if not raw or not raw.strip():
+            return {}
+        try:
+            result = json.loads(raw)
+            return result if isinstance(result, dict) else {"value": result}
+        except (json.JSONDecodeError, TypeError):
+            return {"raw": raw[:200]}
+
+    def _generate_investment_analysis_report(self, data: dict) -> str:
         return ReportTemplates.investment_analysis_template(data)
 
-    def _generate_summary_report(self, data: Dict) -> str:
+    def _generate_summary_report(self, data: dict) -> str:
         return ReportTemplates.summary_template(data)
 
-    def _generate_executive_brief(self, data: Dict) -> str:
+    def _generate_executive_brief(self, data: dict) -> str:
         return ReportTemplates.executive_brief_template(data)
 
-    def _generate_detailed_report(self, data: Dict) -> str:
+    def _generate_detailed_report(self, data: dict) -> str:
         return self._generate_investment_analysis_report(data)
 
-    def _generate_generic_report(self, data: Dict) -> str:
+    def _generate_generic_report(self, data: dict) -> str:
         return f"""# 分析报告
-**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+**生成时间**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 ## 报告内容
 {json.dumps(data, ensure_ascii=False, indent=2)}"""
+
+    def _generate_empty_report(self, report_type: str) -> str:
+        return f"""# {report_type.replace('_', ' ').title()}
+**生成时间**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+> 暂无足够数据生成完整报告，请确认数据源是否正常。"""
 
 
 class DataExportTool(BaseTool):
     """数据导出工具 - 支持JSON/CSV/Excel/Markdown/Word/HTML/TXT"""
 
     name: str = "Data Export Tool"
-    description: str = "将分析数据导出为多种格式"
+    description: str = (
+        "将分析数据导出为多种格式。export_data传JSON字符串(短数据), "
+        "export_format: json/csv/excel/markdown/word/html/txt, filename: 不含扩展名"
+    )
 
-    def _run(self, export_data: str, export_format: str = "json", filename: str = "") -> str:
+    def _run(self, export_data: str = "{}", export_format: str = "json", filename: str = "") -> str:
         try:
             try:
-                data = json.loads(export_data)
-            except json.JSONDecodeError:
-                data = {"raw_content": export_data}
+                data = json.loads(export_data) if isinstance(export_data, str) else export_data
+            except (json.JSONDecodeError, TypeError):
+                data = {"raw_content": str(export_data)[:500]}
             logger.info(f"导出数据，格式: {export_format}")
-            os.makedirs('data/exports', exist_ok=True)
+            os.makedirs("data/exports", exist_ok=True)
             if not filename:
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"export_data_{timestamp}"
             if export_format == "json":
                 return self._export_json(data, filename)
-            elif export_format == "csv":
+            if export_format == "csv":
                 return self._export_csv(data, filename)
-            elif export_format == "excel":
+            if export_format == "excel":
                 return self._export_excel(data, filename)
-            elif export_format == "markdown":
+            if export_format == "markdown":
                 return self._export_markdown(data, filename)
-            elif export_format == "word":
+            if export_format == "word":
                 return self._export_word(data, filename)
-            elif export_format == "html":
+            if export_format == "html":
                 return self._export_html(data, filename)
-            elif export_format == "txt":
+            if export_format == "txt":
                 return self._export_txt(data, filename)
-            else:
-                raise ValueError(f"不支持的导出格式: {export_format}")
+            raise ValueError(f"不支持的导出格式: {export_format}")
         except Exception as e:
             error_msg = f"数据导出失败: {str(e)}"
             logger.error(error_msg)
             return error_msg
 
-    def _export_json(self, data: Dict, filename: str) -> str:
-        filepath = os.path.join('data/exports', f"{filename}.json")
-        with open(filepath, 'w', encoding='utf-8') as f:
+    def _export_json(self, data: dict, filename: str) -> str:
+        if filename.endswith(".json"):
+            filename = filename[:-5]
+        filepath = os.path.join("data/exports", f"{filename}.json")
+        with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info(f"JSON导出完成: {filepath}")
         return filepath
 
-    def _export_csv(self, data: Dict, filename: str) -> str:
+    def _export_csv(self, data: dict, filename: str) -> str:
         import pandas as pd
-        filepath = os.path.join('data/exports', f"{filename}.csv")
+
+        if filename.endswith(".csv"):
+            filename = filename[:-4]
+        filepath = os.path.join("data/exports", f"{filename}.csv")
         df = pd.DataFrame([data])
-        df.to_csv(filepath, index=False, encoding='utf-8-sig')
+        df.to_csv(filepath, index=False, encoding="utf-8-sig")
         logger.info(f"CSV导出完成: {filepath}")
         return filepath
 
-    def _export_excel(self, data: Dict, filename: str) -> str:
+    def _export_excel(self, data: dict, filename: str) -> str:
         import pandas as pd
-        filepath = os.path.join('data/exports', f"{filename}.xlsx")
+
+        if filename.endswith(".xlsx"):
+            filename = filename[:-5]
+        filepath = os.path.join("data/exports", f"{filename}.xlsx")
         df = pd.DataFrame([data])
         df.to_excel(filepath, index=False)
         logger.info(f"Excel导出完成: {filepath}")
         return filepath
 
-    def _export_markdown(self, data: Dict, filename: str) -> str:
-        filepath = os.path.join('data/exports', f"{filename}.md")
+    def _export_markdown(self, data: dict, filename: str) -> str:
+        if filename.endswith(".md"):
+            filename = filename[:-3]
+        filepath = os.path.join("data/exports", f"{filename}.md")
         md = self._dict_to_markdown(data, level=1)
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(md)
         logger.info(f"Markdown导出完成: {filepath}")
         return filepath
 
-    def _export_word(self, data: Dict, filename: str) -> str:
-        filepath = os.path.join('data/exports', f"{filename}.docx")
+    def _export_word(self, data: dict, filename: str) -> str:
+        if filename.endswith(".docx"):
+            filename = filename[:-5]
+        filepath = os.path.join("data/exports", f"{filename}.docx")
         try:
             from docx import Document
+
             doc = Document()
-            doc.add_heading('投资分析报告', 0)
+            doc.add_heading("投资分析报告", 0)
             doc.add_paragraph(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             self._dict_to_docx(data, doc)
             doc.save(filepath)
         except ImportError:
             md_content = self._dict_to_markdown(data)
-            filepath = filepath.replace('.docx', '.md')
-            with open(filepath, 'w', encoding='utf-8') as f:
+            filepath = filepath.replace(".docx", ".md")
+            with open(filepath, "w", encoding="utf-8") as f:
                 f.write(f"# 投资分析报告\n\n> 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n{md_content}")
             logger.info("python-docx未安装，已导出为Markdown格式")
         logger.info(f"Word导出完成: {filepath}")
         return filepath
 
-    def _export_html(self, data: Dict, filename: str) -> str:
-        filepath = os.path.join('data/exports', f"{filename}.html")
+    def _export_html(self, data: dict, filename: str) -> str:
+        if filename.endswith(".html"):
+            filename = filename[:-5]
+        filepath = os.path.join("data/exports", f"{filename}.html")
         html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head><meta charset="UTF-8"><title>投资分析报告</title>
@@ -172,21 +222,23 @@ h1{{color:#1a5276}}h2{{color:#2980b9;border-bottom:2px solid #2980b9}}
 table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ddd;padding:8px;text-align:left}}
 th{{background-color:#2980b9;color:white}}</style></head>
 <body><h1>投资分析报告</h1>
-<p>生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+<p>生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
 {self._dict_to_html(data)}</body></html>"""
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(html)
         logger.info(f"HTML导出完成: {filepath}")
         return filepath
 
-    def _export_txt(self, data: Dict, filename: str) -> str:
-        filepath = os.path.join('data/exports', f"{filename}.txt")
-        with open(filepath, 'w', encoding='utf-8') as f:
+    def _export_txt(self, data: dict, filename: str) -> str:
+        if filename.endswith(".txt"):
+            filename = filename[:-4]
+        filepath = os.path.join("data/exports", f"{filename}.txt")
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(self._dict_to_text(data))
         logger.info(f"TXT导出完成: {filepath}")
         return filepath
 
-    def _dict_to_markdown(self, data: Dict, level: int = 1) -> str:
+    def _dict_to_markdown(self, data: dict, level: int = 1) -> str:
         lines = []
         for key, value in data.items():
             if isinstance(value, dict):
@@ -203,7 +255,7 @@ th{{background-color:#2980b9;color:white}}</style></head>
                 lines.append(f"- **{key}**: {value}")
         return "\n".join(lines) + "\n"
 
-    def _dict_to_html(self, data: Dict, level: int = 2) -> str:
+    def _dict_to_html(self, data: dict, level: int = 2) -> str:
         parts = []
         for key, value in data.items():
             if isinstance(value, dict):
@@ -218,11 +270,10 @@ th{{background-color:#2980b9;color:white}}</style></head>
                 parts.append(f"<p><strong>{key}:</strong> {value}</p>")
         return "\n".join(parts)
 
-    def _dict_to_text(self, data: Dict) -> str:
+    def _dict_to_text(self, data: dict) -> str:
         return json.dumps(data, ensure_ascii=False, indent=2)
 
-    def _dict_to_docx(self, data: Dict, doc, level: int = 1) -> None:
-        from docx import Document
+    def _dict_to_docx(self, data: dict, doc: Any, level: int = 1) -> None:
         for key, value in data.items():
             if isinstance(value, dict):
                 doc.add_heading(key, level=min(level, 3))
@@ -230,7 +281,7 @@ th{{background-color:#2980b9;color:white}}</style></head>
             elif isinstance(value, list):
                 doc.add_heading(key, level=min(level, 3))
                 for item in value:
-                    doc.add_paragraph(str(item), style='List Bullet')
+                    doc.add_paragraph(str(item), style="List Bullet")
             else:
                 doc.add_paragraph(f"{key}: {value}")
 

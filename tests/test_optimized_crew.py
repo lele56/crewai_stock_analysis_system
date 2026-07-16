@@ -1,14 +1,16 @@
 # tests/test_optimized_crew.py
-"""
-测试优化后的CrewAI系统
+"""测试优化后的CrewAI系统
 验证超时控制和性能优化
 """
-import sys
+
 import os
+import sys
 import time
-sys.path.append(os.path.abspath('.'))
+
+sys.path.append(os.path.abspath("."))
 
 from src.crews.data_collection_crew import DataCollectionCrew
+
 
 def test_optimized_crew():
     """测试优化后的CrewAI系统"""
@@ -33,20 +35,20 @@ def test_optimized_crew():
         # 显示优化配置
         print("\n=== 优化配置验证 ===")
         for i, agent in enumerate(test_crew.agents):
-            print(f"智能体 {i+1}: {agent.role}")
+            print(f"智能体 {i + 1}: {agent.role}")
             print(f"  - max_iter: {getattr(agent, 'max_iter', 'N/A')}")
             print(f"  - allow_delegation: {getattr(agent, 'allow_delegation', 'N/A')}")
             print(f"  - memory: {getattr(agent, 'memory', 'N/A')}")
             print(f"  - cache: {getattr(agent, 'cache', 'N/A')}")
 
         # 显示任务简化情况
-        print(f"\n=== 任务简化验证 ===")
+        print("\n=== 任务简化验证 ===")
         for i, task in enumerate(test_crew.tasks):
-            print(f"任务 {i+1}: {task.description[:60]}...")
+            print(f"任务 {i + 1}: {task.description[:60]}...")
             print(f"  - 依赖任务数: {len(task.context)}")
             print(f"  - 异步执行: {task.async_execution}")
 
-        print(f"\n=== 性能优化总结 ===")
+        print("\n=== 性能优化总结 ===")
         print("✓ 禁用了智能体委托 (allow_delegation=False)")
         print("✓ 减少了迭代次数 (max_iter=2-3)")
         print("✓ 禁用了内存功能 (memory=False)")
@@ -58,13 +60,13 @@ def test_optimized_crew():
         print("✓ 减少了详细日志输出")
 
         return True
-    else:
-        print("✗ 创建测试Crew失败")
-        return False
+    print("✗ 创建测试Crew失败")
+    return False
+
 
 def test_timeout_mechanism():
     """测试超时机制"""
-    print(f"\n=== 测试超时机制 ===")
+    print("\n=== 测试超时机制 ===")
 
     # 创建一个超时时间很短的 crew
     crew = DataCollectionCrew(max_execution_time=10)  # 10秒超时
@@ -96,13 +98,14 @@ def test_timeout_mechanism():
         print(f"✓ 测试耗时: {end_time - start_time:.2f} 秒")
         return False
 
+
 if __name__ == "__main__":
     print("开始测试优化后的CrewAI系统...")
 
     success1 = test_optimized_crew()
     success2 = test_timeout_mechanism()
 
-    print(f"\n=== 最终测试结果 ===")
+    print("\n=== 最终测试结果 ===")
     if success1 and success2:
         print("✅ 所有测试通过！")
         print("✅ CrewAI系统已优化，解决了无限运行问题")
@@ -114,4 +117,4 @@ if __name__ == "__main__":
     else:
         print("❌ 部分测试失败，请检查配置")
 
-    print(f"\n系统优化完成！")
+    print("\n系统优化完成！")

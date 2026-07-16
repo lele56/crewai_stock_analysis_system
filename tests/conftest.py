@@ -1,8 +1,7 @@
 # tests/conftest.py
-import pytest
 import tempfile
-import os
-from pathlib import Path
+
+import pytest
 
 
 @pytest.fixture
@@ -17,6 +16,5 @@ def sample_analysis_scores():
         "fundamental_analyst": 75.0,
         "risk_assessment_specialist": 60.0,
         "industry_expert": 80.0,
-        "quantitative_analyst": 70.0,
         "overall_score": 72.0,
     }

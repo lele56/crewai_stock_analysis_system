@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
 # tests/smoke_test.py
-"""
-快速验证脚本 - 测试完整分析流程，确认报告能正常生成
+"""快速验证脚本 - 测试完整分析流程，确认报告能正常生成
 只会跑一只股票，验证全部三个阶段。
 """
-import sys
-import os
-import time
-import json
-from datetime import datetime
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from datetime import datetime
+import json
+import os
+import sys
+import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'reports')
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "reports")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
 
 def test_smoke():
     """快速冒烟测试 - 跑一只股票验证全流程"""
@@ -34,21 +36,17 @@ def test_smoke():
     stage_start = time.time()
     progress_log = []
 
-    def progress_callback(update):
+    def progress_callback(update) -> None:
         progress_log.append(update)
         bar = "█" * (update["progress"] // 5) + "░" * (20 - update["progress"] // 5)
         print(f"  [{bar}] {update['progress']:3d}% | {update['stage']}: {update['message']}")
 
     print(f"\n📊 测试目标: {company} ({ticker})\n")
 
-    result = system.analyze_stock(
-        company, ticker,
-        use_cache=False,
-        progress_callback=progress_callback
-    )
+    result = system.analyze_stock(company, ticker, use_cache=False, progress_callback=progress_callback)
 
     elapsed = time.time() - stage_start
-    print(f"\n⏱️  总耗时: {elapsed:.1f} 秒 ({elapsed/60:.1f} 分钟)")
+    print(f"\n⏱️  总耗时: {elapsed:.1f} 秒 ({elapsed / 60:.1f} 分钟)")
 
     # 验证结果
     checks = []
@@ -74,9 +72,9 @@ def test_smoke():
     else:
         checks.append(("报告文件存在", False))
 
-    reports_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'reports')
+    reports_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "reports")
     if os.path.exists(reports_dir):
-        md_files = [f for f in os.listdir(reports_dir) if f.endswith('.md')]
+        md_files = [f for f in os.listdir(reports_dir) if f.endswith(".md")]
         checks.append((f"reports/目录下 {len(md_files)} 个MD文件", len(md_files) > 0))
 
     print("\n" + "=" * 60)
@@ -93,19 +91,26 @@ def test_smoke():
     print(f"\n{'所有检查通过 ✅' if all_pass else '部分检查失败 ❌'}")
 
     json_path = os.path.join(OUTPUT_DIR, f"test_result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-    with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump({
-            "test_time": datetime.now().isoformat(),
-            "company": company,
-            "ticker": ticker,
-            "elapsed_seconds": elapsed,
-            "checks": {name: passed for name, passed in checks},
-            "all_pass": all_pass,
-            "progress_log": progress_log
-        }, f, ensure_ascii=False, indent=2, default=str)
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "test_time": datetime.now().isoformat(),
+                "company": company,
+                "ticker": ticker,
+                "elapsed_seconds": elapsed,
+                "checks": dict(checks),
+                "all_pass": all_pass,
+                "progress_log": progress_log,
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
     print(f"\n📄 测试结果: {json_path}")
 
     return all_pass
+
 
 if __name__ == "__main__":
     ok = test_smoke()

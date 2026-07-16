@@ -13,7 +13,7 @@
 - **Web界面**: 直观的 Web 管理界面和监控面板
 
 ### 🛠️ 技术亮点
-- **多 Agent 协作**: 9 个专业化 Agent 分工协作
+- **多 Agent 协作**: 10 个专业化 Agent 分工协作（standard 模式）
 - **双重架构模式**: Crews 模式（团队协作）+ Flows 模式（流程控制）
 - **智能数据源**: 集成 AkShare、OpenAI、Serper 等数据源
 - **缓存机制**: 智能缓存提高分析效率
@@ -25,45 +25,46 @@
 ### Agent 团队结构
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    CrewAI 股票分析系统                        │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │  数据收集团队   │  │    分析团队     │  │    决策团队     │ │
-│  │                 │  │                 │  │                 │ │
-│  │ • 市场研究员    │  │ • 基本面分析师  │  │ • 投资顾问      │ │
-│  │ • 财务数据专家  │  │ • 风险评估师    │  │ • 报告生成器    │ │
-│  │ • 技术分析师    │  │ • 行业专家      │  │ • 质量监控员    │ │
-│  │ • 数据验证专家  │  │                 │  │                 │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
-│           │                     │                     │        │
-│           └─────────────────────┼─────────────────────┘        │
-│                                 │                              │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │                  核心工具集                               │ │
-│  │ • AkShare数据工具 • 技术分析工具 • 基本面分析工具        │ │
-│  │ • 报告生成工具 • 风险评估工具 • 市场情绪分析            │ │
-│  └─────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                    CrewAI 股票分析系统                            │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐ │
+│  │   数据采集团队    │ │     分析团队      │ │     决策团队      │ │
+│  │                  │ │                  │ │                  │ │
+│  │ • 市场研究员      │ │ • 基本面分析师    │ │ • 投资策略顾问    │ │
+│  │ • 财务数据专家    │ │ • 风险评估专家    │ │ • 报告生成器      │ │
+│  │ • 技术分析师      │ │ • 行业专家        │ │                  │ │
+│  │ • 数据采集协调员  │ │ • 分析协调员      │ │                  │ │
+│  └──────────────────┘ └──────────────────┘ └──────────────────┘ │
+│           │                      │                      │       │
+│           └──────────────────────┼──────────────────────┘       │
+│                                  │                              │
+│  ┌──────────────────────────────────────────────────────────────┐│
+│  │                    核心工具集                                 ││
+│  │ • MarketDataTool • FinancialTools • TechnicalTools            ││
+│  │ • TechnicalIndicators • TechnicalCharting • ReportingTools    ││
+│  │ • CircuitBreaker（断路器） • Redis缓存 • LLM故障转移          ││
+│  └──────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### 核心组件说明
 
 #### 1. 数据收集团队 (DataCollectionCrew)
-- **市场研究员**: 收集市场新闻、行业信息和公司动态
+- **市场研究员**: 收集市场数据、新闻、行业趋势
 - **财务数据专家**: 获取财务报表、关键财务指标
 - **技术分析师**: 收集价格数据、技术指标
-- **数据验证专家**: 验证数据质量、处理异常值
+- **数据采集协调员**: 协调各数据源，整合采集结果并验证数据完整性
 
 #### 2. 分析团队 (AnalysisCrew)
-- **基本面分析师**: 评估公司基本面、财务健康状况
-- **风险评估师**: 分析投资风险、风险因素识别
+- **基本面分析师**: 评估公司基本面、财务健康状况（含量化验证）
+- **风险评估专家**: 识别市场/信用/流动性等各类风险
 - **行业专家**: 分析行业地位、竞争环境
+- **分析协调员**: 整合多方观点，形成最终投资建议
 
 #### 3. 决策团队 (DecisionCrew)
-- **投资策略顾问**: 生成投资建议、策略制定
-- **报告生成器**: 生成详细分析报告
-- **质量监控员**: 质量控制、结果验证
+- **投资策略顾问**: 综合信息制定投资建议
+- **报告生成器**: 生成标准化投资分析报告，确保分析质量和结果一致性
 
 ## 🔄 核心流程
 
@@ -509,13 +510,30 @@ pip install akshare
 # OpenAI 配置
 OPENAI_API_KEY=your-openai-api-key-here
 OPENAI_MODEL_NAME=gpt-4o
+OPENAI_BASE_URL=https://api.openai.com/v1
 
-# Serper API (可选，用于网络搜索)
+# 模型故障转移（主模型配额耗尽时自动切换）
+LLM_FALLBACK=
+
+# 分析深度: rapid（快速）| standard（标准）| deep（深度）
+ANALYSIS_PROFILE=standard
+
+# Redis 缓存（可选）
+REDIS_ENABLED=false
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+# 断路器配置
+CIRCUIT_BREAKER_ENABLED=true
+CIRCUIT_FAILURE_THRESHOLD=3
+CIRCUIT_RECOVERY_TIMEOUT=300
+
+# Serper API（可选，网络搜索）
 SERPER_API_KEY=your-serper-api-key-here
 
 # 系统配置
 CACHE_TTL=3600
-MAX_WORKERS=5
+MAX_WORKERS=2
 LOG_LEVEL=INFO
 ```
 
@@ -700,20 +718,20 @@ result = analyzer.analyze_multiple_stocks(
 ### 1. 核心工具列表
 
 #### 数据获取工具
-- **AkShareTool**: A股数据获取，支持实时和历史数据
-- **MarketDataTool**: 市场数据获取，包括行情和资金流向
-- **NewsSearchTool**: 新闻搜索，获取相关新闻和公告
+- **MarketDataTool**: 统一数据入口，自动路由到合适的数据源（腾讯K线、akshare、同花顺）
+- **AkShareTools**: A股数据获取，支持实时行情、历史K线、财务数据
+- **AkShareDataParser**: 财务报告文本解析，正则提取关键指标
 
 #### 分析工具
-- **FundamentalAnalysisTool**: 基本面分析，财务指标和估值分析
-- **TechnicalAnalysisTool**: 技术分析，技术指标和图表分析
-- **RiskAssessmentTool**: 风险评估，风险识别和量化分析
-- **SentimentAnalysisTool**: 情绪分析，市场情绪和新闻情绪分析
+- **FinancialTools**: 财务数据提取，正则表达式解析报表文本
+- **TechnicalTools**: 技术分析，MACD、RSI、布林带、KDJ 等指标计算
+- **TechnicalIndicators**: 技术指标底层实现
+- **TechnicalCharting**: K线图、技术指标图表生成（matplotlib）
 
-#### 决策工具
-- **InvestmentAdvisorTool**: 投资建议，策略制定和目标价位设定
-- **ReportGenerationTool**: 报告生成，自动化报告生成和格式化
-- **QualityControlTool**: 质量控制，分析结果验证和质量评估
+#### 保障工具
+- **CircuitBreaker**: 数据源断路器，连续失败3次自动熔断，5分钟后恢复
+- **ReportingTools**: 报告生成，自动化 Markdown 报告
+- **ReportTemplates**: 报告模板管理
 
 ### 2. Agent配置说明
 
@@ -736,30 +754,26 @@ financial_data_expert:
 ```yaml
 fundamental_analyst:
   role: "基本面分析师"
-  goal: "评估{company}的财务状况和内在价值"
-  backstory: "基本面分析专家，擅长财务分析和价值评估"
-  tools: [fundamental_analysis_tool, financial_calculator_tool]
+  goal: "深入评估{company}的基本面价值和长期投资潜力"
+  tools: [market_data_tool, financial_tools]
 
 risk_assessment_specialist:
-  role: "风险评估师"
-  goal: "识别和量化{company}的投资风险"
-  backstory: "风险管理专家，精通风险识别和量化分析"
-  tools: [risk_assessment_tool, financial_calculator_tool]
+  role: "风险评估专家"
+  goal: "识别并全面评估{company}的各类投资风险"
+  tools: [market_data_tool, financial_tools]
 ```
 
 #### 决策团队Agent
 ```yaml
 investment_advisor:
   role: "投资策略顾问"
-  goal: "基于综合分析为{company}提供投资建议"
-  backstory: "资深投资顾问，擅长投资策略制定和风险控制"
-  tools: [investment_advisor_tool, risk_assessment_tool]
+  goal: "基于综合分析结果为{company}制定专业的投资建议"
+  tools: [reporting_tools]
 
 report_generator:
-  role: "报告生成器"
-  goal: "生成{company}的详细投资分析报告"
-  backstory: "专业报告撰写员，擅长数据可视化和报告撰写"
-  tools: [report_generation_tool, charting_tool]
+  role: "投资报告生成器"
+  goal: "生成标准化、专业的投资分析报告"
+  tools: [reporting_tools, technical_charting]
 ```
 
 ## 🔧 高级配置
@@ -855,35 +869,19 @@ monitor.add_alert_rule(
 
 ## 🧪 测试和调试
 
-### 1. 单元测试
+### 1. 测试运行
 ```bash
 # 运行所有测试
-python -m pytest tests/
+python -m pytest tests/ -v --tb=short
+
+# 运行结构测试（快速验证）
+python -m pytest tests/test_system_structure.py tests/test_imports.py -v
+
+# 运行集成测试（完整流程，约 11 分钟）
+python -m pytest tests/test_integration.py -v
 
 # 运行特定测试
-python -m pytest tests/test_stock_analysis_system.py -v
-
-# 运行性能测试
-python -m pytest tests/test_performance.py -v
-```
-
-### 2. 集成测试
-```bash
-# 运行系统集成测试
-python test_final_system.py
-
-# 测试特定功能
-python main.py single --company "测试公司" --ticker "TEST"
-```
-
-### 3. 调试模式
-```bash
-# 启用调试日志
-export LOG_LEVEL=DEBUG
-python main.py single --company "苹果公司" --ticker "AAPL"
-
-# 查看详细执行过程
-python src/flows/investment_flow.py
+python -m pytest tests/test_data_types.py -v
 ```
 
 ## 🔒 安全和合规
@@ -1040,6 +1038,6 @@ pip install -r requirements-dev.txt
 
 ---
 
-*最后更新时间：2025-09-18*
+*最后更新时间：2026-07-16*
 *版本号：v1.0.0*
 *维护者：CrewAI股票分析系统团队*

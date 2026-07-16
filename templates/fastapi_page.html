@@ -219,6 +219,29 @@
         .rating-hold { background: #713f12; color: #fde047; }
         .rating-sell { background: #7f1d1d; color: #fca5a5; }
         .rating-strong_sell { background: #7f1d1d; color: #f87171; }
+        .charts-section {
+            margin-top: 16px;
+        }
+        .charts-section .chart-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 12px;
+        }
+        .charts-section .chart-card {
+            background: #0f172a;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .charts-section .chart-card img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .charts-section .chart-label {
+            padding: 8px 12px;
+            font-size: 0.8rem;
+            color: #94a3b8;
+        }
         .result-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -379,6 +402,10 @@
                         </div>
                     </div>
                     <div class="result-grid" id="resultGrid"></div>
+                    <div class="charts-section" id="chartsSection">
+                        <div class="card-title" style="margin-top:16px;">技术图表</div>
+                        <div class="chart-grid" id="chartGrid"></div>
+                    </div>
                     <div class="status-bar" id="resultStatus"></div>
                 </div>
             </div>
@@ -582,6 +609,19 @@
 
             const statusEl = document.getElementById('resultStatus');
             statusEl.textContent = '分析完成 · ' + new Date().toLocaleString();
+
+            if (result.charts && result.charts.length > 0) {
+                const chartGrid = document.getElementById('chartGrid');
+                chartGrid.innerHTML = result.charts.map(c => `
+                    <div class="chart-card">
+                        <img src="/charts/${c.filename}" alt="${c.label}" loading="lazy">
+                        <div class="chart-label">${c.label}</div>
+                    </div>
+                `).join('');
+                document.getElementById('chartsSection').style.display = 'block';
+            } else {
+                document.getElementById('chartsSection').style.display = 'none';
+            }
         }
 
         async function loadTasks() {

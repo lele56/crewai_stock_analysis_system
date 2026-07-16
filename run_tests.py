@@ -1,17 +1,21 @@
 # run_tests.py
 """快速运行项目测试套件"""
+
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent
 
 
 def run_tests(args=None):
     cmd = [
-        sys.executable, "-m", "pytest",
+        sys.executable,
+        "-m",
+        "pytest",
         str(PROJECT_ROOT / "tests"),
-        "-v", "--tb=short",
+        "-v",
+        "--tb=short",
     ]
     if args:
         cmd.extend(args)

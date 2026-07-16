@@ -1,7 +1,9 @@
 # scripts/check_imports.py
-import sys, os, traceback
-sys.path.insert(0, '.')
-sys.path.insert(0, 'src')
+import sys
+import traceback
+
+sys.path.insert(0, ".")
+sys.path.insert(0, "src")
 
 tests = [
     ("task_dataclasses", "from src.tasks.task_dataclasses import AgentCapability, TaskComplexity, DynamicTask"),

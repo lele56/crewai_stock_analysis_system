@@ -1,14 +1,16 @@
 # tests/final_verification_test.py
-"""
-最终验证测试
+"""最终验证测试
 确认CrewAI无限运行问题已彻底解决
 """
-import sys
+
 import os
+import sys
 import time
-sys.path.append(os.path.abspath('.'))
+
+sys.path.append(os.path.abspath("."))
 
 from src.crews.data_collection_crew import DataCollectionCrew
+
 
 def final_verification():
     """最终验证测试"""
@@ -34,19 +36,19 @@ def final_verification():
             optimizations_verified = 0
 
             for agent in test_crew.agents:
-                if hasattr(agent, 'max_iter') and agent.max_iter <= 3:
+                if hasattr(agent, "max_iter") and agent.max_iter <= 3:
                     optimizations_verified += 1
-                if hasattr(agent, 'allow_delegation') and not agent.allow_delegation:
+                if hasattr(agent, "allow_delegation") and not agent.allow_delegation:
                     optimizations_verified += 1
 
             # 验证Crew配置
-            if hasattr(test_crew, 'process') and test_crew.process.value == 'sequential':
+            if hasattr(test_crew, "process") and test_crew.process.value == "sequential":
                 optimizations_verified += 1
-            if hasattr(test_crew, 'memory') and not test_crew.memory:
+            if hasattr(test_crew, "memory") and not test_crew.memory:
                 optimizations_verified += 1
-            if hasattr(test_crew, 'cache') and not test_crew.cache:
+            if hasattr(test_crew, "cache") and not test_crew.cache:
                 optimizations_verified += 1
-            if hasattr(test_crew, 'planning') and not test_crew.planning:
+            if hasattr(test_crew, "planning") and not test_crew.planning:
                 optimizations_verified += 1
 
             print(f"✓ 优化验证通过: {optimizations_verified}/6 项优化已生效")
@@ -65,9 +67,8 @@ def final_verification():
 
             return True
 
-        else:
-            print("✗ Crew创建失败")
-            return False
+        print("✗ Crew创建失败")
+        return False
 
     except Exception as e:
         end_time = time.time()
@@ -75,11 +76,12 @@ def final_verification():
         print(f"✓ 测试耗时: {end_time - start_time:.2f} 秒")
         return False
 
+
 def show_optimization_summary():
     """显示优化总结"""
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     print("🎉 CREWAI无限运行问题已彻底解决！")
-    print("="*50)
+    print("=" * 50)
 
     print("\n📋 已实施的关键优化:")
     print("1. ✅ 智能体迭代次数限制 (max_iter=2-3)")
@@ -109,13 +111,14 @@ def show_optimization_summary():
     print("3. 监控系统日志以跟踪执行状态")
     print("4. 定期检查和更新配置文件")
 
+
 if __name__ == "__main__":
     success = final_verification()
 
     if success:
         show_optimization_summary()
-        print(f"\n✅ 最终验证通过 - CrewAI系统已完全优化！")
+        print("\n✅ 最终验证通过 - CrewAI系统已完全优化！")
     else:
-        print(f"\n❌ 最终验证失败 - 需要进一步检查")
+        print("\n❌ 最终验证失败 - 需要进一步检查")
 
     print(f"\n测试完成时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")

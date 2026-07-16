@@ -1,13 +1,30 @@
 # src/tools/akshare_data_sources.py
-"""多数据源底层实现 - 腾讯/新浪/TickFlow/akshare/tushare数据获取"""
+"""多数据源底层实现 - 腾讯/新浪/TickFlow/akshare数据获取
+
+所有字段映射集中在 schemas.py，接口变更只需改一处。
+"""
+
+from datetime import datetime, timedelta
 import http.client
 import json
+import logging
 import re
 import ssl
-import logging
-from typing import Dict
-from datetime import datetime, timedelta
+
 import pandas as pd
+
+from src.config import Config
+from src.tools.circuit_breaker import CircuitBreaker
+from src.tools.schemas import (
+    AKSHARE_KLINE_RENAME,
+    SINA_SPOT_SCHEMA,
+    TENCENT_KLINE_SCHEMA,
+    TENCENT_QUOTE_SCHEMA,
+    TICKFLOW_KLINE_RENAME,
+    field,
+    normalize_kline_df,
+    rename_df,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,39 +32,39 @@ _SSL_CTX = ssl.create_default_context()
 _SSL_CTX.check_hostname = False
 _SSL_CTX.verify_mode = ssl.CERT_NONE
 _HTTP_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Referer': 'https://finance.sina.com.cn/',
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": "https://finance.sina.com.cn/",
 }
 
 TICKFLOW_AVAILABLE = False
 _tickflow_free = None
 try:
-    import tickflow as tf  # type: ignore[import-untyped]
-    _tickflow_free = tf
-    TICKFLOW_AVAILABLE = True
-except ImportError:
-    pass
+    import sys
+    import io
 
-TUSHARE_AVAILABLE = False
-_ts_api = None
-try:
-    import tushare as ts  # type: ignore[import-untyped]
-    _ts_api = ts
-    TUSHARE_AVAILABLE = True
-except ImportError:
+    _old_stdout = sys.stdout
+    try:
+        sys.stdout = io.StringIO()
+        import tickflow as tf  # type: ignore[import-untyped]
+
+        _tickflow_free = tf.TickFlow.free()
+        TICKFLOW_AVAILABLE = True
+    finally:
+        sys.stdout = _old_stdout
+except Exception:
     pass
 
 
 def _to_tickflow_symbol(ticker: str) -> str:
-    t = ticker.upper().replace('SH', '').replace('SZ', '')
-    if t.startswith('6'):
+    t = ticker.upper().replace("SH", "").replace("SZ", "")
+    if t.startswith("6"):
         return f"{t}.SH"
     return f"{t}.SZ"
 
 
 def _ensure_exchange_prefix(ticker: str) -> str:
-    t = ticker.lower().replace('sh', '').replace('sz', '')
-    if t.startswith('6'):
+    t = ticker.lower().replace("sh", "").replace("sz", "")
+    if t.startswith("6"):
         return f"sh{t}"
     return f"sz{t}"
 
@@ -63,233 +80,407 @@ def _calculate_start_date(period: str) -> str:
         start_date = today - timedelta(days=periods[period])
     else:
         start_date = today - timedelta(days=365)
-    return start_date.strftime('%Y%m%d')
+    return start_date.strftime("%Y%m%d")
 
 
-# ── 腾讯数据源 ─────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════
+# 实时行情
+# ═══════════════════════════════════════════════════════════════════
+
 
 def fill_from_tickflow(ticker: str, info: dict) -> None:
-    if not TICKFLOW_AVAILABLE:
+    """从 TickFlow 数据源填充股票信息"""
+    cb = CircuitBreaker.get("tickflow_spot")
+    if not TICKFLOW_AVAILABLE or not cb.allow_request():
         return
     try:
         tf_symbol = _to_tickflow_symbol(ticker)
         tf_info = _tickflow_free.instruments.get(tf_symbol)
-        if tf_info and info.get('longName', 'N/A') == 'N/A':
-            info['longName'] = tf_info.get('name', 'N/A')
+        if tf_info and info.get("longName", "N/A") == "N/A":
+            info["longName"] = tf_info.get("name", "N/A")
+        cb.record_success()
     except Exception as e:
+        cb.record_failure(str(e))
         logger.debug(f"TickFlow: {str(e)[:50]}")
 
 
 def fill_from_sina_spot(ticker: str, info: dict) -> None:
+    """从新浪个股行情填充股票信息（Schema 驱动）"""
+    cb = CircuitBreaker.get("sina_spot")
+    if not cb.allow_request():
+        return
     try:
         sina_symbol = _ensure_exchange_prefix(ticker)
-        conn = http.client.HTTPSConnection('hq.sinajs.cn', timeout=10, context=_SSL_CTX)
-        conn.request('GET', f'/list={sina_symbol}', headers=_HTTP_HEADERS)
+        conn = http.client.HTTPSConnection("hq.sinajs.cn", timeout=Config.SOURCE_TIMEOUT, context=_SSL_CTX)
+        conn.request("GET", f"/list={sina_symbol}", headers=_HTTP_HEADERS)
         resp = conn.getresponse()
-        raw = resp.read().decode('gbk', errors='ignore')
+        raw = resp.read().decode("gbk", errors="ignore")
         conn.close()
-        data = raw.split('"')[1] if '"' in raw else ''
+        data = raw.split('"')[1] if '"' in raw else ""
         if not data:
+            cb.record_success()
             return
-        fields = data.split(',')
-        if len(fields) < 32:
+        fields = data.split(",")
+        if len(fields) < 10:
+            cb.record_success()
             return
-        if info.get('longName', 'N/A') == 'N/A':
-            info['longName'] = fields[0] if fields[0] else 'N/A'
-        info['currentPrice'] = float(fields[3]) if fields[3] else info['currentPrice']
-        high = float(fields[4]) if fields[4] else 0
-        low = float(fields[5]) if fields[5] else 0
-        info['fiftyTwoWeekHigh'] = info.get('fiftyTwoWeekHigh', 0) or high
-        info['fiftyTwoWeekLow'] = info.get('fiftyTwoWeekLow', 0) or low
+
+        _name = field(SINA_SPOT_SCHEMA, fields, "name")
+        if _name and info.get("longName", "N/A") == "N/A":
+            info["longName"] = _name
+
+        _price = field(SINA_SPOT_SCHEMA, fields, "current_price")
+        if _price:
+            info["currentPrice"] = float(_price)
+
+        _high = field(SINA_SPOT_SCHEMA, fields, "high")
+        _low = field(SINA_SPOT_SCHEMA, fields, "low")
+        if _high:
+            info["fiftyTwoWeekHigh"] = info.get("fiftyTwoWeekHigh", 0) or float(_high)
+        if _low:
+            info["fiftyTwoWeekLow"] = info.get("fiftyTwoWeekLow", 0) or float(_low)
+
+        cb.record_success()
     except Exception as e:
+        cb.record_failure(str(e))
         logger.debug(f"新浪个股行情: {str(e)[:50]}")
 
 
 def fill_industry_from_sina(code: str, info: dict) -> None:
+    """从新浪获取行业分类信息"""
+    cb = CircuitBreaker.get("sina_industry")
+    if not cb.allow_request():
+        return
     try:
-        conn = http.client.HTTPConnection('vip.stock.finance.sina.com.cn', timeout=10)
-        conn.request('GET', f'/corp/go.php/vCI_CorpOtherInfo/stockid/{code}/menu_num/2.phtml',
-                     headers=_HTTP_HEADERS)
+        conn = http.client.HTTPConnection("vip.stock.finance.sina.com.cn", timeout=Config.SOURCE_TIMEOUT)
+        conn.request("GET", f"/corp/go.php/vCI_CorpOtherInfo/stockid/{code}/menu_num/2.phtml", headers=_HTTP_HEADERS)
         resp = conn.getresponse()
-        html = resp.read().decode('gbk', errors='ignore')
+        html = resp.read().decode("gbk", errors="ignore")
         conn.close()
-        m = re.search(r'所属行业板块</td>\s*</tr>\s*<tr>.*?</tr>\s*<tr>\s*<td[^>]*>(.+?)</td>', html, re.DOTALL)
+        m = re.search(r"所属行业板块</td>\s*</tr>\s*<tr>.*?</tr>\s*<tr>\s*<td[^>]*>(.+?)</td>", html, re.DOTALL)
         if m:
-            info['industry'] = m.group(1).strip()
+            info["industry"] = m.group(1).strip()
+        cb.record_success()
     except Exception as e:
+        cb.record_failure(str(e))
         logger.debug(f"新浪行业分类: {str(e)[:50]}")
 
 
 def fill_from_tencent_quote(code: str, info: dict) -> None:
+    """从腾讯行情API填充股票信息（Schema 驱动）"""
+    cb = CircuitBreaker.get("tencent_quote")
+    if not cb.allow_request():
+        return
     try:
-        ticker = f"sh{code}" if code.startswith('6') else f"sz{code}"
-        conn = http.client.HTTPSConnection('qt.gtimg.cn', timeout=10, context=_SSL_CTX)
-        conn.request('GET', f'/q={ticker}', headers=_HTTP_HEADERS)
+        ticker = f"sh{code}" if code.startswith("6") else f"sz{code}"
+        conn = http.client.HTTPSConnection("qt.gtimg.cn", timeout=Config.SOURCE_TIMEOUT, context=_SSL_CTX)
+        conn.request("GET", f"/q={ticker}", headers=_HTTP_HEADERS)
         resp = conn.getresponse()
-        raw = resp.read().decode('gbk', errors='ignore')
+        raw = resp.read().decode("gbk", errors="ignore")
         conn.close()
-        data = raw.split('"')[1] if '"' in raw else ''
+        data = raw.split('"')[1] if '"' in raw else ""
         if not data:
+            cb.record_success()
             return
-        fields = data.split('~')
+        fields = data.split("~")
         if len(fields) < 50:
+            cb.record_success()
             return
-        if fields[3] and float(fields[3]) > 0:
-            info['currentPrice'] = float(fields[3])
-        pe = fields[39] if fields[39] else ''
-        if pe and pe != '0':
-            info['trailingPE'] = float(pe)
-            info['forwardPE'] = float(pe)
-        pb = fields[46] if fields[46] else ''
-        if pb and pb != '0':
-            info['priceToBook'] = float(pb)
-        mcap = fields[44] if fields[44] else ''
-        if mcap and mcap != '0':
-            info['marketCap'] = int(float(mcap) * 1e8)
-        high52 = fields[47] if fields[47] else ''
-        if high52 and high52 != '0':
-            info['fiftyTwoWeekHigh'] = max(info.get('fiftyTwoWeekHigh', 0) or 0, float(high52))
-        low52 = fields[48] if fields[48] else ''
-        if low52 and low52 != '0':
-            info['fiftyTwoWeekLow'] = info.get('fiftyTwoWeekLow', 0) or float(low52)
+
+        _price = field(TENCENT_QUOTE_SCHEMA, fields, "current_price")
+        if _price and float(_price) > 0:
+            info["currentPrice"] = float(_price)
+
+        _pe = field(TENCENT_QUOTE_SCHEMA, fields, "pe", "")
+        if _pe and _pe != "0":
+            info["trailingPE"] = float(_pe)
+            info["forwardPE"] = float(_pe)
+
+        _pb = field(TENCENT_QUOTE_SCHEMA, fields, "pb", "")
+        if _pb and _pb != "0":
+            info["priceToBook"] = float(_pb)
+
+        _mcap = field(TENCENT_QUOTE_SCHEMA, fields, "market_cap", "")
+        if _mcap and _mcap != "0":
+            info["marketCap"] = int(float(_mcap) * 1e8)
+
+        _high52 = field(TENCENT_QUOTE_SCHEMA, fields, "week52_high", "")
+        if _high52 and _high52 != "0":
+            info["fiftyTwoWeekHigh"] = max(info.get("fiftyTwoWeekHigh", 0) or 0, float(_high52))
+
+        _low52 = field(TENCENT_QUOTE_SCHEMA, fields, "week52_low", "")
+        if _low52 and _low52 != "0":
+            info["fiftyTwoWeekLow"] = info.get("fiftyTwoWeekLow", 0) or float(_low52)
+
+        cb.record_success()
     except Exception as e:
+        cb.record_failure(str(e))
         logger.debug(f"腾讯行情API: {str(e)[:50]}")
 
 
 def fill_valuation_from_akshare(code: str, info: dict) -> None:
+    """从 akshare 获取估值指标"""
+    cb = CircuitBreaker.get("akshare_valuation")
+    if not cb.allow_request():
+        return
     try:
         import akshare as ak
-        indicator_df = ak.stock_financial_analysis_indicator(symbol=code)
+
+        indicator_df = ak.stock_financial_analysis_indicator(symbol=code, start_year="2024")
         if not indicator_df.empty:
-            ind = indicator_df.set_index('指标名称')['最新'].to_dict()
-            info['dividendYield'] = float(ind.get('股息率', 0)) / 100 if ind.get('股息率', 0) else info.get('dividendYield', 0)
-            info['beta'] = float(ind.get('贝塔系数', 0)) if ind.get('贝塔系数', 0) else 'N/A'
-            if info.get('trailingPE', 'N/A') == 'N/A':
-                info['trailingPE'] = float(ind.get('市盈率', 0)) if ind.get('市盈率', 0) else 'N/A'
-            if info.get('priceToBook', 'N/A') == 'N/A':
-                info['priceToBook'] = float(ind.get('市净率', 0)) if ind.get('市净率', 0) else 'N/A'
-    except Exception:
+            ind = indicator_df.set_index("指标名称")["最新"].to_dict()
+            info["dividendYield"] = (
+                float(ind.get("股息率", 0)) / 100 if ind.get("股息率", 0) else info.get("dividendYield", 0)
+            )
+            info["beta"] = float(ind.get("贝塔系数", 0)) if ind.get("贝塔系数", 0) else "N/A"
+            if info.get("trailingPE", "N/A") == "N/A":
+                info["trailingPE"] = float(ind.get("市盈率", 0)) if ind.get("市盈率", 0) else "N/A"
+            if info.get("priceToBook", "N/A") == "N/A":
+                info["priceToBook"] = float(ind.get("市净率", 0)) if ind.get("市净率", 0) else "N/A"
+        cb.record_success()
+    except Exception as e:
+        cb.record_failure(str(e))
         logger.debug("akshare估值指标获取失败，使用已有数据")
 
 
-# ── K线数据 ─────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════
+# K 线数据
+# ═══════════════════════════════════════════════════════════════════
+
 
 def get_tencent_kline(code: str, period: str) -> pd.DataFrame:
+    """从腾讯获取K线数据（Schema 驱动）"""
+    cb = CircuitBreaker.get("tencent_kline")
+    if not cb.allow_request():
+        return pd.DataFrame()
     try:
         start_date = pd.to_datetime(_calculate_start_date(period))
-        tk_code = f"sh{code}" if code.startswith('6') else f"sz{code}"
-        conn = http.client.HTTPSConnection('web.ifzq.gtimg.cn', timeout=10, context=_SSL_CTX)
-        url = f'/appstock/app/fqkline/get?param={tk_code},day,,,640,qfq'
-        conn.request('GET', url, headers=_HTTP_HEADERS)
+        tk_code = f"sh{code}" if code.startswith("6") else f"sz{code}"
+        conn = http.client.HTTPSConnection("web.ifzq.gtimg.cn", timeout=Config.SOURCE_TIMEOUT, context=_SSL_CTX)
+        url = f"/appstock/app/fqkline/get?param={tk_code},day,,,640,qfq"
+        conn.request("GET", url, headers=_HTTP_HEADERS)
         resp = conn.getresponse()
-        raw = resp.read().decode('utf-8', errors='ignore')
+        raw = resp.read().decode("utf-8", errors="ignore")
         conn.close()
         data = json.loads(raw)
-        klines = data.get('data', {}).get(tk_code, {}).get('qfqday', []) or \
-                 data.get('data', {}).get(tk_code, {}).get('day', [])
+        klines = data.get("data", {}).get(tk_code, {}).get("qfqday", []) or data.get("data", {}).get(tk_code, {}).get(
+            "day", []
+        )
         if not klines:
+            cb.record_success()
             return pd.DataFrame()
-        rows = [{'Date': pd.to_datetime(k[0]), 'Open': float(k[1]), 'Close': float(k[2]),
-                 'High': float(k[3]), 'Low': float(k[4]), 'Volume': float(k[5])} for k in klines]
-        df = pd.DataFrame(rows).set_index('Date')
-        return df[df.index >= start_date]
+
+        rows = [
+            {
+                "Date": pd.to_datetime(field(TENCENT_KLINE_SCHEMA, k, "date", "")),
+                "Open": float(field(TENCENT_KLINE_SCHEMA, k, "open", 0)),
+                "Close": float(field(TENCENT_KLINE_SCHEMA, k, "close", 0)),
+                "High": float(field(TENCENT_KLINE_SCHEMA, k, "high", 0)),
+                "Low": float(field(TENCENT_KLINE_SCHEMA, k, "low", 0)),
+                "Volume": float(field(TENCENT_KLINE_SCHEMA, k, "volume", 0)),
+            }
+            for k in klines
+        ]
+        df = pd.DataFrame(rows).set_index("Date")
+        df = df[df.index >= start_date]
+        cb.record_success()
+        return df
     except Exception as e:
+        cb.record_failure(str(e))
         logger.debug(f"腾讯K线: {str(e)[:50]}")
         return pd.DataFrame()
 
 
 def get_tickflow_kline(ticker: str, period: str) -> pd.DataFrame:
-    if not TICKFLOW_AVAILABLE:
+    """从 TickFlow 获取K线数据"""
+    cb = CircuitBreaker.get("tickflow_kline")
+    if not TICKFLOW_AVAILABLE or not cb.allow_request():
         return pd.DataFrame()
     try:
         tf_symbol = _to_tickflow_symbol(ticker)
         start = _calculate_start_date(period)
-        end = datetime.now().strftime('%Y%m%d')
-        df = _tickflow_free.daily(tf_symbol, start_date=start, end_date=end)
+        end = datetime.now().strftime("%Y%m%d")
+        start_ts = int(datetime.strptime(start, "%Y%m%d").timestamp())
+        end_ts = int(datetime.strptime(end, "%Y%m%d").timestamp())
+        df = _tickflow_free.klines.get(tf_symbol, start_time=start_ts, end_time=end_ts, as_dataframe=True)
         if df is not None and not df.empty:
-            df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low',
-                                    'close': 'Close', 'volume': 'Volume'})
+            df = rename_df(df, TICKFLOW_KLINE_RENAME)
             df.index = pd.to_datetime(df.index)
-            return df[['Open', 'High', 'Low', 'Close', 'Volume']]
+            df = normalize_kline_df(df)
+            cb.record_success()
+            return df
+        cb.record_success()
     except Exception as e:
+        cb.record_failure(str(e))
         logger.debug(f"TickFlow K线: {str(e)[:50]}")
     return pd.DataFrame()
 
 
-def get_tushare_kline(code: str, period: str) -> pd.DataFrame:
-    if not TUSHARE_AVAILABLE:
+def get_akshare_kline(ticker: str, period: str) -> pd.DataFrame:
+    """从 akshare 获取K线数据（Schema 驱动）"""
+    cb = CircuitBreaker.get("akshare_kline")
+    if not cb.allow_request():
         return pd.DataFrame()
     try:
-        start = _calculate_start_date(period)
-        end = datetime.now().strftime('%Y%m%d')
-        pro = _ts_api.pro_api()
-        df = pro.daily(ts_code=f"{code}.SH" if code.startswith('6') else f"{code}.SZ",
-                       start_date=start, end_date=end)
-        if df is not None and not df.empty:
-            df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low',
-                                    'close': 'Close', 'vol': 'Volume'})
-            df['Date'] = pd.to_datetime(df['trade_date'])
-            df = df.set_index('Date').sort_index()
-            return df[['Open', 'High', 'Low', 'Close', 'Volume']]
-    except Exception as e:
-        logger.debug(f"Tushare K线: {str(e)[:50]}")
-    return pd.DataFrame()
-
-
-def get_akshare_kline(ticker: str, period: str) -> pd.DataFrame:
-    try:
         import akshare as ak
-        end_date = datetime.now().strftime('%Y%m%d')
+
+        end_date = datetime.now().strftime("%Y%m%d")
         start_date = _calculate_start_date(period)
-        df = ak.stock_zh_a_daily(symbol=ticker, start_date=start_date, end_date=end_date, adjust="qfq")
+        symbol = _ensure_exchange_prefix(ticker)
+        df = ak.stock_zh_a_daily(symbol=symbol, start_date=start_date, end_date=end_date, adjust="qfq")
         if not df.empty:
-            df = df.rename(columns={'开盘': 'Open', '收盘': 'Close', '最高': 'High', '最低': 'Low', '成交量': 'Volume'})
-            if '日期' in df.columns:
-                df['Date'] = pd.to_datetime(df['日期'])
-            elif 'date' in df.columns:
-                df['Date'] = pd.to_datetime(df['date'])
-            else:
-                df['Date'] = pd.date_range(end=end_date, periods=len(df), freq='D')
-            df = df.set_index('Date')
-            for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-                if col not in df.columns:
-                    df[col] = 0
-            return df[['Open', 'High', 'Low', 'Close', 'Volume']]
+            df = rename_df(df, AKSHARE_KLINE_RENAME)
+            df = normalize_kline_df(df)
+            cb.record_success()
+            return df
+        cb.record_success()
     except Exception as e:
+        cb.record_failure(str(e))
         logger.debug(f"akshare K线: {str(e)[:50]}")
     return pd.DataFrame()
 
 
-# ── 财务报表 ────────────────────────────────────
-
-def get_sina_financial(code: str, statement_type: str) -> pd.DataFrame:
+def get_tencent_akshare_kline(ticker: str, period: str) -> pd.DataFrame:
+    """从腾讯（akshare封装）获取K线数据，作为腾讯HTTP的替补"""
+    cb = CircuitBreaker.get("tencent_ak_kline")
+    if not cb.allow_request():
+        return pd.DataFrame()
     try:
         import akshare as ak
-        return ak.stock_financial_report_sina(stock=f"sh{code}" if code.startswith('6') else f"sz{code}",
-                                              symbol=statement_type)
-    except Exception:
+
+        symbol = _ensure_exchange_prefix(ticker)
+        start = _calculate_start_date(period)
+        end = datetime.now().strftime("%Y%m%d")
+        df = ak.stock_zh_a_hist_tx(symbol=symbol, start_date=start, end_date=end, adjust="qfq")
+        if not df.empty:
+            df = df.rename(columns={"date": "Date", "open": "Open", "close": "Close", "high": "High", "low": "Low", "amount": "Volume"})
+            df["Date"] = pd.to_datetime(df["Date"])
+            df = df.set_index("Date")[["Open", "High", "Low", "Close", "Volume"]]
+            cb.record_success()
+            return df
+        cb.record_success()
+    except Exception as e:
+        cb.record_failure(str(e))
+        logger.debug(f"腾讯akshare K线: {str(e)[:50]}")
+    return pd.DataFrame()
+
+
+def get_index_daily_tx(symbol: str) -> pd.DataFrame:
+    """从腾讯获取指数日线数据，作为主指数接口的替补"""
+    cb = CircuitBreaker.get("index_tx")
+    if not cb.allow_request():
         return pd.DataFrame()
-
-
-def get_akshare_financial(code: str, statement_type: str) -> pd.DataFrame:
     try:
         import akshare as ak
-        return ak.stock_financial_report_sina(symbol=code, report_type=statement_type)
-    except Exception:
-        return pd.DataFrame()
+
+        df = ak.stock_zh_index_daily_tx(symbol=symbol)
+        if not df.empty:
+            df = df.rename(columns={"date": "Date", "open": "open", "close": "close", "high": "high", "low": "low", "amount": "amount"})
+            cb.record_success()
+            return df
+        cb.record_success()
+    except Exception as e:
+        cb.record_failure(str(e))
+        logger.debug(f"腾讯指数日线: {str(e)[:50]}")
+    return pd.DataFrame()
 
 
-def get_tushare_financial(code: str, statement_type: str) -> pd.DataFrame:
-    if not TUSHARE_AVAILABLE:
+def get_index_spot_sina() -> pd.DataFrame:
+    """从新浪获取指数实时行情"""
+    cb = CircuitBreaker.get("index_sina")
+    if not cb.allow_request():
         return pd.DataFrame()
     try:
-        ts_code = f"{code}.SH" if code.startswith('6') else f"{code}.SZ"
-        pro = _ts_api.pro_api()
-        if statement_type == "利润表":
-            return pro.income(ts_code=ts_code)
-        elif statement_type == "资产负债表":
-            return pro.balancesheet(ts_code=ts_code)
-        elif statement_type == "现金流量表":
-            return pro.cashflow(ts_code=ts_code)
-    except Exception:
+        import akshare as ak
+
+        df = ak.stock_zh_index_spot_sina()
+        cb.record_success()
+        return df
+    except Exception as e:
+        cb.record_failure(str(e))
+        logger.debug(f"新浪指数行情: {str(e)[:50]}")
+    return pd.DataFrame()
+
+
+def get_valuation_baidu(code: str) -> dict:
+    """从百度获取估值数据（总市值），作为 stock_value_em 的替补"""
+    cb = CircuitBreaker.get("baidu_valuation")
+    if not cb.allow_request():
+        return {}
+    try:
+        import akshare as ak
+
+        df = ak.stock_zh_valuation_baidu(symbol=code, indicator="总市值")
+        if not df.empty:
+            cb.record_success()
+            return {"marketCap": float(df["value"].iloc[-1]) * 1e8, "source": "baidu"}
+        cb.record_success()
+    except Exception as e:
+        cb.record_failure(str(e))
+        logger.debug(f"百度估值: {str(e)[:50]}")
+    return {}
+
+
+def fill_company_info_cninfo(code: str, info: dict) -> None:
+    """从巨潮资讯网补充公司基本信息"""
+    cb = CircuitBreaker.get("cninfo_profile")
+    if not cb.allow_request():
+        return
+    try:
+        import akshare as ak
+
+        df = ak.stock_profile_cninfo(symbol=code)
+        if not df.empty:
+            row = df.iloc[0]
+            if info.get("longName", "N/A") == "N/A":
+                info["longName"] = row.get("公司名称", "N/A")
+            if info.get("industry", "N/A") == "N/A":
+                info["industry"] = row.get("所属行业", "N/A")
+            info["website"] = row.get("官方网站", "N/A")
+            info["listedDate"] = row.get("上市日期", "N/A")
+            info["registeredCapital"] = row.get("注册资金", "N/A")
+        cb.record_success()
+    except Exception as e:
+        cb.record_failure(str(e))
+        logger.debug(f"巨潮公司信息: {str(e)[:50]}")
+
+
+def fill_business_ths(code: str, info: dict) -> None:
+    """从同花顺补充主营业务信息"""
+    cb = CircuitBreaker.get("ths_business")
+    if not cb.allow_request():
+        return
+    try:
+        import akshare as ak
+
+        df = ak.stock_zyjs_ths(symbol=code)
+        if not df.empty:
+            row = df.iloc[0]
+            info["mainBusiness"] = row.get("主营业务", "N/A")
+            info["productType"] = row.get("产品类型", "N/A")
+            info["productName"] = row.get("产品名称", "N/A")
+        cb.record_success()
+    except Exception as e:
+        cb.record_failure(str(e))
+        logger.debug(f"同花顺主营业务: {str(e)[:50]}")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 财务报表
+# ═══════════════════════════════════════════════════════════════════
+
+
+def get_financial_data_ths(code: str, statement_type: str = "all") -> pd.DataFrame:
+    """从同花顺获取财务报表（替代已失效的新浪和东方财富API）"""
+    cb = CircuitBreaker.get("ths_financial")
+    if not cb.allow_request():
+        return pd.DataFrame()
+    try:
+        import akshare as ak
+
+        df = ak.stock_financial_abstract_ths(symbol=code, indicator="按年度")
+        cb.record_success()
+        return df
+    except Exception as e:
+        cb.record_failure(str(e))
         return pd.DataFrame()

@@ -1,0 +1,17 @@
+# config/tasks_data.yaml
+# 数据收集团队任务
+market_research:
+  description: "收集{company}的市场数据和行业信息"
+  expected_output: "市场研究报告"
+
+financial_data_collection:
+  description: "收集{company}的财务报表和财务指标"
+  expected_output: "财务数据报告"
+
+technical_data_collection:
+  description: "收集{company}的技术分析数据"
+  expected_output: "技术数据报告"
+
+data_collection_coordination:
+  description: "整合{company}的所有数据收集结果，确保数据完整性和一致性"
+  expected_output: "数据收集汇总报告"

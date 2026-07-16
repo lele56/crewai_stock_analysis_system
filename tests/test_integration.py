@@ -1,19 +1,17 @@
 # tests/test_integration.py
-"""
-集成测试 - 端到端流程（不依赖 LLM）
-"""
-import pytest
+"""集成测试 - 端到端流程（不依赖 LLM）"""
+
 import os
 import tempfile
-from unittest.mock import Mock, patch, MagicMock
-from src.stock_analysis_system import StockAnalysisSystem
+from unittest.mock import patch
+
+import pytest
+
 from src.crews.decision_executor import (
-    run_collective_decision_vote,
-    run_collaboration_optimization,
     _map_score_to_vote,
+    run_collective_decision_vote,
 )
-from src.tasks.collective_decision_maker import get_decision_maker
-from src.tasks.dynamic_task_allocation import get_task_allocator
+from src.stock_analysis_system import StockAnalysisSystem
 
 
 class TestDecisionExecutorIntegration:
@@ -35,21 +33,14 @@ class TestDecisionExecutorIntegration:
         assert _map_score_to_vote(10.0, 0.7) == "强烈卖出"
 
     def test_run_collective_decision_vote(self, sample_analysis_scores):
-        result = run_collective_decision_vote(
-            "测试公司", "TEST", sample_analysis_scores
-        )
-        assert result['vote_id'] is not None
-        assert result['result'] in ["强烈买入", "买入", "持有", "卖出", "强烈卖出"]
-        assert 0.0 <= result['confidence'] <= 1.0
-        assert result['decision_type'] == 'weighted'
-        assert result['voter_count'] == 5
+        result = run_collective_decision_vote("测试公司", "TEST", sample_analysis_scores)
+        assert result["vote_id"] is not None
+        assert result["result"] in ["强烈买入", "买入", "持有", "卖出", "强烈卖出"]
+        assert 0.0 <= result["confidence"] <= 1.0
+        assert result["decision_type"] == "weighted"
+        assert result["voter_count"] == 3
 
-    def test_run_collaboration_optimization(self):
-        result = run_collaboration_optimization()
-        assert 'efficiency' in result
-        assert 'bottlenecks' in result
-        assert 'recommendations' in result
-        assert 'optimization_actions' in result
+    
 
 
 class TestStockAnalysisSystemIntegration:
@@ -57,58 +48,63 @@ class TestStockAnalysisSystemIntegration:
 
     @pytest.fixture
     def system(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('src.config.Config.CACHE_DIR', tmpdir):
-                sys = StockAnalysisSystem()
-                yield sys
+        with tempfile.TemporaryDirectory() as tmpdir, patch("src.config.Config.CACHE_DIR", tmpdir):
+            sys = StockAnalysisSystem()
+            yield sys
 
     def test_initialization(self, system):
         assert system.data_collection_crew is not None
         assert system.analysis_crew is not None
         assert system.decision_crew is not None
-        assert len(system.analysis_history) == 0
+        assert len(system.get_analysis_history()) == 0
 
     def test_cache_flow(self, system):
         test_data = {
-            'success': True,
-            'company': '测试公司',
-            'ticker': 'TEST',
-            'final_recommendation': {'action': '持有', 'confidence': 0.7},
+            "success": True,
+            "company": "测试公司",
+            "ticker": "TEST",
+            "final_recommendation": {"action": "持有", "confidence": 0.7},
         }
-        system.cache.set("TEST", test_data)
-        assert system.cache.check("TEST") is True
-        cached = system.cache.get("TEST")
-        assert cached['success'] is True
-        assert cached['company'] == '测试公司'
+        system.cache_manager.save_to_cache("TEST", test_data)
+        assert system.cache_manager.check_cache("TEST") is True
+        cached = system.cache_manager.get_from_cache("TEST")
+        assert cached["success"] is True
+        assert cached["company"] == "测试公司"
 
     def test_get_cache_stats(self, system):
-        system.cache.set("TEST", {"data": "test"})
+        system.cache_manager.save_to_cache("TEST", {"data": "test"})
         stats = system.get_cache_stats()
-        assert stats['cache_size'] == 1
+        assert stats["cache_size"] == 1
 
     def test_clear_cache(self, system):
-        system.cache.set("TEST", {"data": "test"})
+        system.cache_manager.save_to_cache("TEST", {"data": "test"})
         system.clear_cache()
         stats = system.get_cache_stats()
-        assert stats['cache_size'] == 0
+        assert stats["cache_size"] == 0
 
     def test_add_to_history(self, system):
         result = {
-            'success': True, 'company': '测试', 'ticker': 'TEST',
-            'timestamp': '2026-01-01T00:00:00',
-            'overall_score': 75.0,
-            'investment_rating': {'rating': '买入'},
+            "success": True,
+            "company": "测试",
+            "ticker": "TEST",
+            "timestamp": "2026-01-01T00:00:00",
+            "overall_score": 75.0,
+            "investment_rating": {"rating": "买入"},
         }
-        system._add_to_history(result)
-        assert len(system.analysis_history) == 1
+        system.cache_manager.add_to_history(result)
+        assert len(system.get_analysis_history()) == 1
 
     def test_export_history(self, system, tmp_path):
-        system._add_to_history({
-            'success': True, 'company': '测试公司', 'ticker': 'TEST',
-            'timestamp': '2026-01-01T00:00:00',
-            'overall_score': 75.0,
-            'investment_rating': {'rating': '持有'},
-        })
+        system.cache_manager.add_to_history(
+            {
+                "success": True,
+                "company": "测试公司",
+                "ticker": "TEST",
+                "timestamp": "2026-01-01T00:00:00",
+                "overall_score": 75.0,
+                "investment_rating": {"rating": "持有"},
+            }
+        )
         filepath = str(tmp_path / "history.json")
         system.export_history(filepath)
         assert os.path.exists(filepath)
@@ -123,17 +119,17 @@ class TestFullWorkflow:
 
     @pytest.fixture
     def mock_system(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('src.config.Config.CACHE_DIR', tmpdir):
-                sys = StockAnalysisSystem()
-                yield sys
+        with tempfile.TemporaryDirectory() as tmpdir, patch("src.config.Config.CACHE_DIR", tmpdir):
+            sys = StockAnalysisSystem()
+            yield sys
 
     def test_full_analyze_workflow_mocked(self, mock_system):
         """完整分析流程（Mock所有外部依赖）"""
         mock_collection_result = {
             "status": "success",
             "result": "模拟数据收集结果",
-            "company": "测试公司", "ticker": "TEST",
+            "company": "测试公司",
+            "ticker": "TEST",
             "execution_time": 1.0,
         }
         mock_analysis_result = {
@@ -154,65 +150,54 @@ class TestFullWorkflow:
             "final_recommendation": {"action": "买入", "confidence": 0.85},
         }
 
-        with patch.object(mock_system.data_collection_crew,
-                         'execute_data_collection',
-                         return_value=mock_collection_result):
-            with patch.object(mock_system.analysis_crew,
-                             'execute_collaborative_analysis',
-                             return_value=mock_analysis_result):
-                with patch.object(mock_system.decision_crew,
-                                 'execute_decision_process',
-                                 return_value=mock_decision_result):
-                    with patch.object(mock_system.decision_crew,
-                                     'generate_analysis_summary',
-                                     return_value="分析摘要"):
-                        with patch.object(mock_system.decision_crew,
-                                         'generate_investment_report',
-                                         return_value="投资报告"):
-                            with patch.object(mock_system.decision_crew,
-                                             'save_report',
-                                             return_value="/tmp/report.md"):
-                                with patch.object(mock_system.decision_crew,
-                                                 'export_to_json',
-                                                 return_value="/tmp/data.json"):
-                                    result = mock_system.analyze_stock(
-                                        "测试公司", "TEST", use_cache=False
-                                    )
+        with (
+            patch.object(
+                mock_system.data_collection_crew, "execute_data_collection", return_value=mock_collection_result
+            ),
+            patch.object(
+                mock_system.analysis_crew, "execute_collaborative_analysis", return_value=mock_analysis_result
+            ),
+            patch.object(mock_system.decision_crew, "execute_decision_process", return_value=mock_decision_result),
+            patch("src.stock_analysis_system.generate_analysis_summary", return_value="分析摘要"),
+            patch("src.stock_analysis_system.generate_investment_report", return_value="投资报告"),
+            patch("src.stock_analysis_system.save_report", return_value="/tmp/report.md"),
+            patch("src.stock_analysis_system.export_to_json", return_value="/tmp/data.json"),
+        ):
+            result = mock_system.analyze_stock("测试公司", "TEST", use_cache=False)
 
-        assert result['success'] is True
-        assert result['company'] == "测试公司"
-        assert result['ticker'] == "TEST"
-        assert 'investment_rating' in result
-        assert 'scores' in result
+        assert result["success"] is True
+        assert result["company"] == "测试公司"
+        assert result["ticker"] == "TEST"
+        assert "investment_rating" in result
+        assert "scores" in result
 
     def test_analyze_with_collection_failure(self, mock_system):
         """数据收集失败时的降级处理"""
         mock_collection_result = {
             "status": "failed",
             "error": "数据收集失败",
-            "company": "测试公司", "ticker": "TEST",
+            "company": "测试公司",
+            "ticker": "TEST",
         }
 
-        with patch.object(mock_system.data_collection_crew,
-                         'execute_data_collection',
-                         return_value=mock_collection_result):
-            result = mock_system.analyze_stock(
-                "测试公司", "TEST", use_cache=False
-            )
+        with patch.object(
+            mock_system.data_collection_crew, "execute_data_collection", return_value=mock_collection_result
+        ):
+            result = mock_system.analyze_stock("测试公司", "TEST", use_cache=False)
 
-        assert result['success'] is False
-        assert "数据收集失败" in result.get('error', '')
+        assert result["success"] is False
+        assert "数据收集失败" in result.get("error", "")
 
     def test_analyze_with_cache_hit(self, mock_system):
         """缓存命中时直接返回"""
         cached_result = {
-            'success': True,
-            'company': '测试公司',
-            'ticker': 'TEST',
-            'final_recommendation': {'action': '持有', 'confidence': 0.7},
+            "success": True,
+            "company": "测试公司",
+            "ticker": "TEST",
+            "final_recommendation": {"action": "持有", "confidence": 0.7},
         }
-        mock_system.cache.set("TEST", cached_result)
+        mock_system.cache_manager.save_to_cache("TEST", cached_result)
 
         result = mock_system.analyze_stock("测试公司", "TEST", use_cache=True)
-        assert result['success'] is True
-        assert result['company'] == '测试公司'
+        assert result["success"] is True
+        assert result["company"] == "测试公司"

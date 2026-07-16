@@ -1,7 +1,8 @@
 # web/web_templates.py
 """Web应用HTML模板"""
-import os
+
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -160,22 +161,68 @@ INDEX_HTML = """<!DOCTYPE html>
             e.preventDefault();
             const formData = new FormData(e.target);
             const data = Object.fromEntries(formData);
+            const resultDiv = document.getElementById('singleResult');
+            resultDiv.innerHTML = '<div class="progress">提交中...</div>';
             fetch('/analyze', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) })
             .then(response => response.json())
             .then(data => {
-                const resultDiv = document.getElementById('singleResult');
-                if (data.success) {
-                    resultDiv.innerHTML = `<div class="success"><h3>分析成功！</h3>
-                        <p><strong>公司:</strong> ${data.company}</p><p><strong>股票代码:</strong> ${data.ticker}</p>
-                        <p><strong>投资评级:</strong> ${data.investment_rating.rating}</p>
-                        <p><strong>综合评分:</strong> ${data.overall_score.toFixed(1)}/100</p>
-                        <p><strong>报告路径:</strong> ${data.report_path}</p></div>`;
+                if (data.success && data.task_id) {
+                    resultDiv.innerHTML = `<div class="progress">分析中... (${data.company})</div>`;
+                    pollTask(data.task_id, resultDiv);
+
+                    const resultDiv = document.getElementById('singleResult');
+                    if (data.cached) {
+                        resultDiv.innerHTML = `<div class="success"><h3>缓存命中！</h3></div>`;
+                    }
+                } else if (data.success && data.cached) {
+                    resultDiv.innerHTML = `<div class="success"><h3>缓存命中！</h3></div>`;
                 } else {
-                    resultDiv.innerHTML = `<div class="error">分析失败: ${data.error}</div>`;
+                    resultDiv.innerHTML = `<div class="error">分析失败: ${data.error || '未知错误'}</div>`;
                 }
             })
-            .catch(error => { document.getElementById('singleResult').innerHTML = `<div class="error">请求失败: ${error}</div>`; });
+            .catch(error => { resultDiv.innerHTML = `<div class="error">请求失败: ${error}</div>`; });
         });
+
+        function pollTask(taskId, resultDiv) {
+            let attempts = 0;
+            const maxAttempts = 120;
+            const interval = setInterval(() => {
+                attempts++;
+                fetch('/task/' + taskId)
+                .then(response => {
+                    if (response.status === 404) {
+                        clearInterval(interval);
+                        resultDiv.innerHTML = '<div class="error">任务已过期（服务器可能重启），请重新提交</div>';
+                        return null;
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (!data) return;
+                    if (data.status === 'completed') {
+                        clearInterval(interval);
+                        const r = data.result || {};
+                        resultDiv.innerHTML = `<div class="success"><h3>分析完成！</h3>
+                            <p><strong>公司:</strong> ${data.company}</p>
+                            <p><strong>耗时:</strong> ${r._elapsed_time || '?'}秒</p>
+                            <p><strong>状态:</strong> ${r.success ? '成功' : '失败'}</p>
+                            ${r.error ? '<p class="error">' + r.error + '</p>' : ''}
+                            ${r.report_path ? '<p><strong>报告:</strong> ' + r.report_path + '</p>' : ''}</div>`;
+                    } else if (data.status === 'failed') {
+                        clearInterval(interval);
+                        resultDiv.innerHTML = `<div class="error">分析失败: ${(data.result && data.result.error) || '未知错误'}</div>`;
+                    } else {
+                        const pct = data.progress || 0;
+                        resultDiv.innerHTML = `<div class="progress">分析中... ${data.message || ''} (${pct}%)</div>`;
+                    }
+                    if (attempts >= maxAttempts) {
+                        clearInterval(interval);
+                        resultDiv.innerHTML = '<div class="error">分析超时，请重试</div>';
+                    }
+                })
+                .catch(() => {});  // 网络错误静默忽略，等下次轮询
+            }, 2000);
+        }
         document.getElementById('batchForm').addEventListener('submit', function(e) {
             e.preventDefault();
             const formData = new FormData(e.target);
@@ -241,11 +288,11 @@ INDEX_HTML = """<!DOCTYPE html>
 </html>"""
 
 
-def create_templates():
+def create_templates() -> None:
     """创建HTML模板文件"""
-    os.makedirs('templates', exist_ok=True)
-    if not os.path.exists('templates/index.html'):
-        with open('templates/index.html', 'w', encoding='utf-8') as f:
+    os.makedirs("templates", exist_ok=True)
+    if not os.path.exists("templates/index.html"):
+        with open("templates/index.html", "w", encoding="utf-8") as f:
             f.write(INDEX_HTML)
         logger.info("HTML模板已创建")
     else:

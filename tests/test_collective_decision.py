@@ -1,13 +1,13 @@
 # tests/test_collective_decision.py
-import pytest
 from src.tasks.collective_decision_maker import (
-    CollectiveDecisionMaker, get_decision_maker, create_investment_decision_vote
+    CollectiveDecisionMaker,
+    create_investment_decision_vote,
+    get_decision_maker,
 )
 from src.tasks.task_dataclasses import DecisionType, VotingRecord
 
 
 class TestCollectiveDecisionMaker:
-
     def test_init(self):
         dm = CollectiveDecisionMaker()
         assert dm.decision_type == DecisionType.WEIGHTED
@@ -85,7 +85,6 @@ class TestCollectiveDecisionMaker:
 
 
 class TestConvenienceFunctions:
-
     def test_create_investment_decision_vote_high_score(self):
         vote = create_investment_decision_vote("test", 90, 0.8)
         assert vote.vote == "强烈买入"

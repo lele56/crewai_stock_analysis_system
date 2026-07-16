@@ -44,7 +44,6 @@ Thumbs.db
 *archive*/
 */archive*/
 
-
 # Local development settings
 local_settings.py
 db.sqlite3
@@ -52,8 +51,26 @@ db.sqlite3
 # Runtime files
 log.txt
 *.log
-data/
-reports/
-cache/
 .pytest_cache/
-FINAL_TEST_REPORT.md
+.ruff_cache/
+
+# Output directories
+reports/
+data/
+
+# Session & temp files
+SESSION_NOTES.md
+CLAUDE.md
+CREWAI_FRAMEWORK_ANALYSIS.md
+_check_*.py
+_explore_*.py
+_test_*.py
+_verify_*.py
+_*.py
+check_data.py
+run_tests.py
+test_moutai.py
+.trae/
+
+# Config
+.claude/

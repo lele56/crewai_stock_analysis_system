@@ -1,8 +1,12 @@
 # tests/test_data_models.py
-import pytest
 from src.tasks.task_dataclasses import (
-    AgentCapability, TaskComplexity, TaskStatus,
-    DecisionType, VotingRecord, DynamicTask, AgentProfile,
+    AgentCapability,
+    AgentProfile,
+    DecisionType,
+    DynamicTask,
+    TaskComplexity,
+    TaskStatus,
+    VotingRecord,
 )
 
 

@@ -1,11 +1,12 @@
 # scripts/validate_data_sources.py
-"""数据源验证脚本 - 测试腾讯/新浪/TickFlow/akshare/tushare数据获取"""
-import sys
-import os
-import time
-import logging
+"""数据源验证脚本 - 测试腾讯/新浪/TickFlow/akshare数据获取"""
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import logging
+import os
+import sys
+import time
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.config import Config
 
@@ -33,9 +34,9 @@ def test_stock_basic_info():
             info = get_stock_basic_info(ticker)
             print(f"    公司名称: {info.get('longName', 'N/A')}")
             print(f"    行业: {info.get('industry', 'N/A')}")
-            mcap = info.get('marketCap', 0)
+            mcap = info.get("marketCap", 0)
             print(f"    市值: {'¥' + f'{mcap:,.0f}' if mcap else 'N/A'}")
-            price = info.get('currentPrice', 0)
+            price = info.get("currentPrice", 0)
             print(f"    当前价格: {'¥' + f'{price:.2f}' if price else 'N/A'}")
             print(f"    市盈率: {info.get('trailingPE', 'N/A')}")
             print(f"    市净率: {info.get('priceToBook', 'N/A')}")
@@ -103,14 +104,22 @@ def test_data_source_availability():
     print("\n" + "=" * 60)
     print("  4. 数据源可用性检查")
     print("=" * 60)
-    from src.tools.akshare_data_sources import TICKFLOW_AVAILABLE, TUSHARE_AVAILABLE
+    from src.tools.akshare_data_sources import TICKFLOW_AVAILABLE
+    from src.tools.circuit_breaker import CircuitBreaker
+
     print(f"\n  TickFlow: {'✓ 可用' if TICKFLOW_AVAILABLE else '✗ 未安装'}")
-    print(f"  Tushare:  {'✓ 可用' if TUSHARE_AVAILABLE else '✗ 未安装'}")
     try:
         import akshare
+
         print(f"  akshare:  ✓ 可用 (版本: {akshare.__version__})")
     except ImportError:
         print("  akshare:  ✗ 未安装")
+
+    print("\n  断路器状态:")
+    for name, status in CircuitBreaker.all_status().items():
+        state = status["state"]
+        icon = {"closed": "●", "open": "✗", "half_open": "◐"}.get(state, "?")
+        print(f"    {icon} {name}: {state} (成功:{status['total_successes']} 失败:{status['total_failures']})")
 
 
 def test_report_generation():
@@ -118,9 +127,12 @@ def test_report_generation():
     print("  5. 测试报告生成")
     print("=" * 60)
     from src.tools.akshare_data_parser import (
-        get_stock_basic_info, get_stock_history_data, get_financial_statements,
         generate_stock_report,
+        get_financial_statements,
+        get_stock_basic_info,
+        get_stock_history_data,
     )
+
     ticker = "sh600000"
     print(f"\n  生成 {ticker} 完整报告:")
     try:
@@ -144,17 +156,25 @@ def test_export_formats():
     print("\n" + "=" * 60)
     print("  6. 测试多格式导出")
     print("=" * 60)
-    from src.tools.reporting_tools import DataExportTool
     import json
 
-    test_data = json.dumps({
-        "company": "浦发银行", "ticker": "sh600000",
-        "industry": "银行", "currentPrice": 10.50,
-        "marketCap": 300000000000, "trailingPE": 5.2,
-        "recommendation": "持有", "overall_score": 72.5,
-        "risk_factors": ["利率风险", "信用风险", "监管风险"],
-        "financial_metrics": {"ROE": "12.5%", "ROA": "0.8%", "NIM": "2.1%"},
-    }, ensure_ascii=False)
+    from src.tools.reporting_tools import DataExportTool
+
+    test_data = json.dumps(
+        {
+            "company": "浦发银行",
+            "ticker": "sh600000",
+            "industry": "银行",
+            "currentPrice": 10.50,
+            "marketCap": 300000000000,
+            "trailingPE": 5.2,
+            "recommendation": "持有",
+            "overall_score": 72.5,
+            "risk_factors": ["利率风险", "信用风险", "监管风险"],
+            "financial_metrics": {"ROE": "12.5%", "ROA": "0.8%", "NIM": "2.1%"},
+        },
+        ensure_ascii=False,
+    )
 
     tool = DataExportTool()
     for fmt in ["json", "csv", "markdown", "html", "txt", "word"]:

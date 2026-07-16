@@ -1,12 +1,13 @@
 # src/tasks/task_dataclasses.py
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import List, Dict, Optional
-from uuid import uuid4
 from datetime import datetime
+from enum import Enum
+from uuid import uuid4
 
 
 class AgentCapability(Enum):
+    """Agent能力类型"""
+
     FUNDAMENTAL_ANALYSIS = "fundamental_analysis"
     TECHNICAL_ANALYSIS = "technical_analysis"
     QUANTITATIVE_ANALYSIS = "quantitative_analysis"
@@ -19,6 +20,8 @@ class AgentCapability(Enum):
 
 
 class TaskComplexity(Enum):
+    """任务复杂度"""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -26,6 +29,8 @@ class TaskComplexity(Enum):
 
 
 class TaskStatus(Enum):
+    """任务状态"""
+
     PENDING = "pending"
     ASSIGNED = "assigned"
     ACTIVE = "active"
@@ -34,6 +39,8 @@ class TaskStatus(Enum):
 
 
 class DecisionType(Enum):
+    """决策类型"""
+
     UNANIMOUS = "unanimous"
     MAJORITY = "majority"
     WEIGHTED = "weighted"
@@ -42,6 +49,8 @@ class DecisionType(Enum):
 
 @dataclass
 class VotingRecord:
+    """投票记录"""
+
     voter: str
     vote: str
     confidence: float
@@ -51,37 +60,44 @@ class VotingRecord:
 
 @dataclass
 class DynamicTask:
+    """动态任务"""
+
     name: str
     description: str
-    required_capabilities: List[AgentCapability]
+    required_capabilities: list[AgentCapability]
     complexity: TaskComplexity = TaskComplexity.MEDIUM
     priority: int = 1
-    dependencies: List[str] = field(default_factory=list)
+    dependencies: list[str] = field(default_factory=list)
     estimated_duration: int = 60
     id: str = field(default_factory=lambda: str(uuid4())[:8])
-    assigned_agent: Optional[str] = None
+    assigned_agent: str | None = None
     status: TaskStatus = TaskStatus.PENDING
-    started_at: Optional[str] = None
-    completed_at: Optional[str] = None
-    result: Optional[Dict] = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    result: dict | None = None
 
-    def __lt__(self, other):
+    def __lt__(self, other: "DynamicTask") -> bool:
+        return self.priority > other.priority
+
+    def __gt__(self, other: "DynamicTask") -> bool:
         return self.priority > other.priority
 
 
 @dataclass
 class AgentProfile:
+    """Agent 画像"""
+
     name: str
-    capabilities: List[AgentCapability]
-    capability_scores: Dict[AgentCapability, float] = field(default_factory=dict)
+    capabilities: list[AgentCapability]
+    capability_scores: dict[AgentCapability, float] = field(default_factory=dict)
     max_workload: float = 100.0
     current_workload: float = 0.0
     availability: bool = True
     success_rate: float = 0.8
-    task_history: List[str] = field(default_factory=list)
+    task_history: list[str] = field(default_factory=list)
 
-    def calculate_fitness(self, required_capabilities: List[AgentCapability],
-                          complexity: TaskComplexity) -> float:
+    def calculate_fitness(self, required_capabilities: list[AgentCapability], complexity: TaskComplexity) -> float:
+        """计算Agent与任务的匹配度"""
         if not all(cap in self.capabilities for cap in required_capabilities):
             return 0.0
         score = sum(self.capability_scores.get(cap, 0.5) for cap in required_capabilities)

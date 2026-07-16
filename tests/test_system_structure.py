@@ -1,43 +1,41 @@
 #!/usr/bin/env python3
 # tests/test_system_structure.py
-"""
-简单的系统结构测试
+"""简单的系统结构测试
 不需要安装所有依赖，只测试基本结构
 """
 
 import os
 import sys
+
+import pytest
 import yaml
-from pathlib import Path
+
 
 def test_project_structure():
     """测试项目结构"""
     print("🔍 测试项目结构...")
 
     required_files = [
-        'README.md',
-        'requirements.txt',
-        '.env',
-        '.env.example',
-        'main.py',
-        '股票分析系统开发计划.md',
-        'config/agents.yaml',
-        'config/tasks.yaml',
-        'config/tools.yaml',
-        'src/stock_analysis_system.py',
-        'src/crews/data_collection_crew.py',
-        'src/crews/analysis_crew.py',
-        'src/crews/decision_crew.py',
-        'src/flows/investment_flow.py',
-        'src/flows/batch_analysis_flow.py',
-        'src/tools/financial_tools.py',
-        'src/tools/technical_tools.py',
-        'src/tools/fundamental_tools.py',
-        'src/tools/reporting_tools.py',
-        'src/utils/batch_analyzer.py',
-        'src/utils/monitor.py',
-        'web/web_app.py',
-        'tests/test_stock_analysis_system.py'
+        "README.md",
+        "requirements.txt",
+        ".env",
+        ".env.example",
+        "main.py",
+        "src/crews/config/agents.yaml",
+        "src/crews/config/tasks.yaml",
+        "src/stock_analysis_system.py",
+        "src/crews/data_collection_crew.py",
+        "src/crews/analysis_crew.py",
+        "src/crews/decision_crew.py",
+        "src/flows/investment_flow.py",
+        "src/flows/batch_analysis_flow.py",
+        "src/tools/financial_tools.py",
+        "src/tools/technical_tools.py",
+        "src/tools/reporting_tools.py",
+        "src/utils/batch_analyzer.py",
+        "src/utils/monitor.py",
+        "web/web_app.py",
+        "tests/test_stock_analysis_system.py",
     ]
 
     missing_files = []
@@ -47,41 +45,43 @@ def test_project_structure():
 
     if missing_files:
         print(f"❌ 缺失文件: {', '.join(missing_files)}")
-        return False
-    else:
-        print("✅ 所有必需文件都存在")
-        return True
+        pytest.fail(f"缺失文件: {', '.join(missing_files)}")
+    print("✅ 所有必需文件都存在")
+
 
 def test_yaml_configurations():
     """测试YAML配置文件"""
     print("\n🔍 测试YAML配置文件...")
 
-    config_files = ['config/agents.yaml', 'config/tasks.yaml', 'config/tools.yaml']
+    config_files = ["src/crews/config/agents.yaml", "src/crews/config/tasks.yaml"]
 
     for config_file in config_files:
         try:
-            with open(config_file, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
+            with open(config_file, encoding="utf-8") as f:
+                yaml.safe_load(f)
             print(f"✅ {config_file} 格式正确")
         except Exception as e:
             print(f"❌ {config_file} 格式错误: {str(e)}")
-            return False
+            pytest.fail(f"{config_file} 格式错误: {str(e)}")
 
-    return True
+    print("✅ 所有YAML配置文件格式正确")
+
 
 def test_agent_definitions():
     """测试Agent定义"""
     print("\n🔍 测试Agent定义...")
 
     try:
-        with open('config/agents.yaml', 'r', encoding='utf-8') as f:
+        with open("src/crews/config/agents.yaml", encoding="utf-8") as f:
             agents_config = yaml.safe_load(f)
 
         required_agents = [
-            'market_researcher', 'financial_data_expert', 'technical_analyst',
-            'data_validation_expert', 'fundamental_analyst', 'risk_assessment_specialist',
-            'industry_expert', 'investment_strategy_advisor', 'report_generator',
-            'quality_control_specialist', 'data_collection_coordinator'
+            "fundamental_analyst",
+            "risk_assessment_specialist",
+            "industry_expert",
+            "analysis_coordinator",
+            "investment_advisor",
+            "report_generator",
         ]
 
         missing_agents = []
@@ -91,29 +91,29 @@ def test_agent_definitions():
 
         if missing_agents:
             print(f"❌ 缺失Agent: {', '.join(missing_agents)}")
-            return False
-        else:
-            print("✅ 所有必需的Agent都已定义")
-            return True
+            pytest.fail(f"缺失Agent: {', '.join(missing_agents)}")
+        print("✅ 所有必需的Agent都已定义")
 
     except Exception as e:
         print(f"❌ Agent定义测试失败: {str(e)}")
-        return False
+        pytest.fail(f"Agent定义测试失败: {str(e)}")
+
 
 def test_task_definitions():
     """测试Task定义"""
     print("\n🔍 测试Task定义...")
 
     try:
-        with open('config/tasks.yaml', 'r', encoding='utf-8') as f:
+        with open("src/crews/config/tasks.yaml", encoding="utf-8") as f:
             tasks_config = yaml.safe_load(f)
 
         required_tasks = [
-            'market_research_task', 'financial_data_collection_task',
-            'technical_analysis_task', 'data_validation_task',
-            'fundamental_analysis_task', 'risk_assessment_task',
-            'industry_analysis_task', 'investment_recommendation_task',
-            'report_generation_task', 'quality_control_task'
+            "fundamental_analysis_task",
+            "risk_assessment_task",
+            "industry_analysis_task",
+            "analysis_coordination_task",
+            "investment_strategy_task",
+            "report_generation_task",
         ]
 
         missing_tasks = []
@@ -123,43 +123,41 @@ def test_task_definitions():
 
         if missing_tasks:
             print(f"❌ 缺失Task: {', '.join(missing_tasks)}")
-            return False
-        else:
-            print("✅ 所有必需的Task都已定义")
-            return True
+            pytest.fail(f"缺失Task: {', '.join(missing_tasks)}")
+        print("✅ 所有必需的Task都已定义")
 
     except Exception as e:
         print(f"❌ Task定义测试失败: {str(e)}")
-        return False
+        pytest.fail(f"Task定义测试失败: {str(e)}")
+
 
 def test_python_syntax():
     """测试Python文件语法"""
     print("\n🔍 测试Python文件语法...")
 
     python_files = [
-        'main.py',
-        'src/stock_analysis_system.py',
-        'src/crews/data_collection_crew.py',
-        'src/crews/analysis_crew.py',
-        'src/crews/decision_crew.py',
-        'src/flows/investment_flow.py',
-        'src/flows/batch_analysis_flow.py',
-        'src/tools/financial_tools.py',
-        'src/tools/technical_tools.py',
-        'src/tools/fundamental_tools.py',
-        'src/tools/reporting_tools.py',
-        'src/utils/batch_analyzer.py',
-        'src/utils/monitor.py',
-        'web/web_app.py',
-        'tests/test_stock_analysis_system.py'
+        "main.py",
+        "src/stock_analysis_system.py",
+        "src/crews/data_collection_crew.py",
+        "src/crews/analysis_crew.py",
+        "src/crews/decision_crew.py",
+        "src/flows/investment_flow.py",
+        "src/flows/batch_analysis_flow.py",
+        "src/tools/financial_tools.py",
+        "src/tools/technical_tools.py",
+        "src/tools/reporting_tools.py",
+        "src/utils/batch_analyzer.py",
+        "src/utils/monitor.py",
+        "web/web_app.py",
+        "tests/test_stock_analysis_system.py",
     ]
 
     syntax_errors = []
     for file_path in python_files:
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding="utf-8") as f:
                 code = f.read()
-            compile(code, file_path, 'exec')
+            compile(code, file_path, "exec")
             print(f"✅ {file_path} 语法正确")
         except SyntaxError as e:
             syntax_errors.append(f"{file_path}: {str(e)}")
@@ -168,20 +166,19 @@ def test_python_syntax():
 
     if syntax_errors:
         print(f"❌ 语法错误: {', '.join(syntax_errors)}")
-        return False
-    else:
-        print("✅ 所有Python文件语法正确")
-        return True
+        pytest.fail(f"语法错误: {', '.join(syntax_errors)}")
+    print("✅ 所有Python文件语法正确")
+
 
 def test_documentation():
     """测试文档"""
     print("\n🔍 测试文档...")
 
-    doc_files = ['README.md', '股票分析系统开发计划.md']
+    doc_files = ["README.md", "股票分析系统开发计划.md"]
 
     for doc_file in doc_files:
         try:
-            with open(doc_file, 'r', encoding='utf-8') as f:
+            with open(doc_file, encoding="utf-8") as f:
                 content = f.read()
 
             # 检查文档长度
@@ -193,9 +190,10 @@ def test_documentation():
 
         except Exception as e:
             print(f"❌ {doc_file} 文档测试失败: {str(e)}")
-            return False
+            pytest.fail(f"{doc_file} 文档测试失败: {str(e)}")
 
-    return True
+    print("✅ 所有文档完整")
+
 
 def main():
     """主测试函数"""
@@ -208,7 +206,7 @@ def main():
         test_agent_definitions,
         test_task_definitions,
         test_python_syntax,
-        test_documentation
+        test_documentation,
     ]
 
     passed = 0
@@ -237,9 +235,9 @@ def main():
         print("✅ 缓存机制")
         print("✅ 错误处理和重试")
         return True
-    else:
-        print("❌ 部分测试失败，请检查上述错误。")
-        return False
+    print("❌ 部分测试失败，请检查上述错误。")
+    return False
+
 
 if __name__ == "__main__":
     success = main()

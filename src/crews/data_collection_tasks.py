@@ -1,9 +1,15 @@
 # src/crews/data_collection_tasks.py
-"""
-数据收集团队 Task 定义
-"""
+"""数据收集团队 Task 定义"""
+
 from crewai import Task
-from src.config import Config
+
+# task_id → agent_id 映射
+_TASK_AGENT_MAP = {
+    "market_research": "market_researcher",
+    "financial_data_collection": "financial_data_expert",
+    "technical_data_collection": "technical_analyst",
+    "data_collection_coordination": "data_collection_coordinator",
+}
 
 
 def _get_default_tasks_config() -> dict:
@@ -23,14 +29,15 @@ def _get_default_tasks_config() -> dict:
     }
 
 
-def create_data_collection_tasks(tasks_config=None) -> list:
-    config = tasks_config or _get_default_tasks_config()
+def create_data_collection_tasks(tasks_config: dict | None = None, agents: dict | None = None) -> list:
+    """创建数据收集任务列表"""
     tasks = []
+    config = tasks_config or _get_default_tasks_config()
+    agents = agents or {}
 
     for task_id, task_cfg in config.items():
-        tasks.append(Task(
-            config=task_cfg,
-            agent=None,
-        ))
+        agent_id = _TASK_AGENT_MAP.get(task_id)
+        assigned_agent = agents.get(agent_id) if agent_id else None
+        tasks.append(Task(config=task_cfg, agent=assigned_agent))
 
     return tasks

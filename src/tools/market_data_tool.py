@@ -3,6 +3,15 @@
 通过 akshare 获取真实 A 股市场数据，数据源不可用时降级为通用描述
 """
 
+import sys
+import types
+
+# 阻止 py_mini_racer，避免 Windows 上 V8 内存冲突
+if "py_mini_racer" not in sys.modules:
+    _fm = types.ModuleType("py_mini_racer")
+    _fm.MiniRacer = type("_FakeMiniRacer", (), {"__init__": lambda *a, **k: None, "__call__": lambda *a, **k: None})()
+    sys.modules["py_mini_racer"] = _fm
+
 from datetime import datetime
 import logging
 

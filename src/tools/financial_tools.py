@@ -90,10 +90,50 @@ class FinancialCalculatorTool(BaseTool):
 
     @staticmethod
     def _fetch_financial_from_api(ticker: str) -> dict:
-        """从缓存直接读取财务数据（数据收集阶段已写入）"""
+        """获取财务数据：优先缓存，缓存未命中则直接调 API"""
         from src.tools.akshare_data_parser import load_financial_from_cache
 
-        return load_financial_from_cache(ticker)
+        data = load_financial_from_cache(ticker)
+        if data:
+            return data
+
+        try:
+            from src.tools.akshare_data_parser import get_financial_statements
+
+            result: dict[str, float] = {}
+            for stype, sections in [("利润表", ["financials"]), ("资产负债表", ["balance_sheet"]), ("现金流量表", ["cashflow"])]:
+                df = get_financial_statements(ticker, stype)
+                if not df.empty:
+                    record = df.iloc[0].to_dict()
+                    for k, v in record.items():
+                        try:
+                            result[k] = float(v)
+                        except (ValueError, TypeError):
+                            pass
+
+            _key_map = {
+                "营业总收入": "revenue", "营业收入": "revenue",
+                "净利润": "net_income",
+                "资产总计": "total_assets",
+                "股东权益": "equity",
+                "流动资产": "current_assets",
+                "流动负债": "current_liabilities",
+                "存货": "inventory",
+                "货币资金": "cash",
+                "负债合计": "total_debt",
+                "经营活动现金流量净额": "operating_cashflow",
+            }
+            for cn, en in _key_map.items():
+                if cn in result:
+                    result[en] = result[cn]
+
+            if result:
+                logger.info("直接从 API 获取财务数据成功")
+                return result
+        except Exception as e:
+            logger.warning("直接调 API 获取财务数据失败: %s", str(e)[:80])
+
+        return {}
 
     def _parse_report_text(self, text: str) -> dict:
         """从股票数据报告文本中提取结构化财务数据"""

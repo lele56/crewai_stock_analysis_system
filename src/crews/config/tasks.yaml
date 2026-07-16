@@ -1,25 +1,25 @@
 # 分析团队任务
-fundamental_analysis_task:
+fundamental_analysis:
   description: "对{company}进行全面的基本面分析，并用量化方法验证分析结论"
   expected_output: "详细的基本面分析报告（含量化验证）"
 
-risk_assessment_task:
+risk_assessment:
   description: "对{company}进行全面的风险评估"
   expected_output: "全面的风险评估报告"
 
-industry_analysis_task:
+industry_analysis:
   description: "对{company}进行深度行业分析"
   expected_output: "深度行业分析报告"
 
-analysis_coordination_task:
+analysis_coordination:
   description: "协调和整合所有分析工作"
   expected_output: "最终投资分析报告"
 
 # 决策团队任务
-investment_strategy_task:
+investment_strategy:
   description: "为{company}制定投资策略建议"
   expected_output: "投资策略建议报告"
 
-report_generation_task:
+report_generation:
   description: "生成{company}的标准化投资分析报告，并进行质量审核把关"
   expected_output: "标准化投资分析报告（含质量审核）"

@@ -4,6 +4,29 @@
 所有字段映射集中在 schemas.py，接口变更只需改一处。
 """
 
+# ═══════════════════════════════════════════════════════════════
+# 阻止 py_mini_racer 被 akshare 导入
+# 原因：py_mini_racer 内嵌 V8 JS 引擎，在 Windows 上 V8 的
+# ConfigurablePool 内存分配器与 Python 3.11+ 的内存池冲突，
+# 触发 C++ 层 FATAL 崩溃，无法被 try/except 捕获。
+# 我们的数据源（腾讯HTTP/新浪HTTP/TickFlow）不依赖 JS 执行，
+# 屏蔽它不影响核心功能。
+# ═══════════════════════════════════════════════════════════════
+import sys
+import types
+
+
+_NOT_FOUND = type("_ModuleNotFound", (ModuleNotFoundError,), {})
+_FAKE_MINIRACER = types.ModuleType("py_mini_racer")
+
+
+def _fake_mini_racer_error(*_args, **_kwargs):
+    raise _NOT_FOUND("py_mini_racer 已被屏蔽，当前数据源不需要它")
+
+
+_FAKE_MINIRACER.MiniRacer = _fake_mini_racer_error
+sys.modules["py_mini_racer"] = _FAKE_MINIRACER
+
 from datetime import datetime, timedelta
 import http.client
 import json

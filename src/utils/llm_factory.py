@@ -25,12 +25,13 @@ logger = logging.getLogger(__name__)
 
 
 def get_llm() -> LLM:
-    """获取 LLM 实例（带 temperature 控制）"""
+    """获取 LLM 实例（带 temperature 和 timeout 控制）"""
     model = Config.LLM_MODEL
     kwargs = {
         "model": model,
         "temperature": Config.LLM_TEMPERATURE,
         "max_tokens": Config.LLM_MAX_TOKENS,
+        "timeout": Config.LLM_TIMEOUT,
         "api_key": Config.LLM_API_KEY or None,
         "base_url": Config.LLM_BASE_URL or None,
     }
@@ -41,5 +42,5 @@ def get_llm() -> LLM:
         logger.info(f"LLM 故障转移列表已配置: {model} -> {Config.LLM_FALLBACK_LIST}")
 
     llm = LLM(**kwargs)
-    logger.info(f"LLM 初始化: {model}, temperature={Config.LLM_TEMPERATURE}")
+    logger.info(f"LLM 初始化: {model}, temperature={Config.LLM_TEMPERATURE}, timeout={Config.LLM_TIMEOUT}s")
     return llm

@@ -41,6 +41,7 @@ class Config:
     LLM_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
     LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.1"))
     LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4096"))
+    LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "120"))  # LLM HTTP 请求超时（秒），默认 2 分钟
 
     # ── Agent 通用配置 ───────────────────────────
     AGENT_MAX_ITER = int(os.getenv("AGENT_MAX_ITER", "3"))

@@ -28,6 +28,28 @@ from src.tools.schemas import (
 
 logger = logging.getLogger(__name__)
 
+
+def _safe_float(val) -> float | None:
+    """安全转换数值（支持亿/万/千单位）"""
+    if val is None or pd.isna(val):
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    s = str(val).strip().replace(",", "").replace(" ", "")
+    if not s:
+        return None
+    units = {"亿": 1e8, "万": 1e4, "千": 1e3, "百": 1e2, "十": 1e1}
+    for unit, multiplier in units.items():
+        if s.endswith(unit):
+            try:
+                return float(s[:-1]) * multiplier
+            except ValueError:
+                continue
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
 _SSL_CTX = ssl.create_default_context()
 _SSL_CTX.check_hostname = False
 _SSL_CTX.verify_mode = ssl.CERT_NONE
@@ -219,24 +241,27 @@ def fill_from_tencent_quote(code: str, info: dict) -> None:
 
 
 def fill_valuation_from_akshare(code: str, info: dict) -> None:
-    """从 akshare 获取估值指标"""
+    """从 akshare 东方财富获取估值指标"""
     cb = CircuitBreaker.get("akshare_valuation")
     if not cb.allow_request():
         return
     try:
         import akshare as ak
 
-        indicator_df = ak.stock_financial_analysis_indicator(symbol=code, start_year="2024")
+        symbol = f"{code}.SH" if code.startswith("6") else f"{code}.SZ"
+        indicator_df = ak.stock_financial_analysis_indicator_em(symbol=symbol)
         if not indicator_df.empty:
-            ind = indicator_df.set_index("指标名称")["最新"].to_dict()
-            info["dividendYield"] = (
-                float(ind.get("股息率", 0)) / 100 if ind.get("股息率", 0) else info.get("dividendYield", 0)
-            )
-            info["beta"] = float(ind.get("贝塔系数", 0)) if ind.get("贝塔系数", 0) else "N/A"
+            row = indicator_df.iloc[0]
+            if info.get("dividendYield", "N/A") == "N/A" or info.get("dividendYield", 0) == 0:
+                dividend = _safe_float(row.get("股息率(%)", 0))
+                if dividend:
+                    info["dividendYield"] = dividend / 100
+            if info.get("beta", "N/A") == "N/A":
+                info["beta"] = _safe_float(row.get("贝塔系数", 0)) or "N/A"
             if info.get("trailingPE", "N/A") == "N/A":
-                info["trailingPE"] = float(ind.get("市盈率", 0)) if ind.get("市盈率", 0) else "N/A"
+                info["trailingPE"] = _safe_float(row.get("市盈率", 0)) or "N/A"
             if info.get("priceToBook", "N/A") == "N/A":
-                info["priceToBook"] = float(ind.get("市净率", 0)) if ind.get("市净率", 0) else "N/A"
+                info["priceToBook"] = _safe_float(row.get("市净率", 0)) or "N/A"
         cb.record_success()
     except Exception as e:
         cb.record_failure(str(e))
@@ -317,7 +342,7 @@ def get_tickflow_kline(ticker: str, period: str) -> pd.DataFrame:
 
 
 def get_akshare_kline(ticker: str, period: str) -> pd.DataFrame:
-    """从 akshare 获取K线数据（Schema 驱动）"""
+    """从腾讯（akshare封装）获取K线数据（纯HTTP，不依赖 py_mini_racer）"""
     cb = CircuitBreaker.get("akshare_kline")
     if not cb.allow_request():
         return pd.DataFrame()
@@ -327,10 +352,11 @@ def get_akshare_kline(ticker: str, period: str) -> pd.DataFrame:
         end_date = datetime.now().strftime("%Y%m%d")
         start_date = _calculate_start_date(period)
         symbol = _ensure_exchange_prefix(ticker)
-        df = ak.stock_zh_a_daily(symbol=symbol, start_date=start_date, end_date=end_date, adjust="qfq")
+        df = ak.stock_zh_a_hist_tx(symbol=symbol, start_date=start_date, end_date=end_date, adjust="qfq")
         if not df.empty:
-            df = rename_df(df, AKSHARE_KLINE_RENAME)
-            df = normalize_kline_df(df)
+            df = df.rename(columns={"date": "Date", "open": "Open", "close": "Close", "high": "High", "low": "Low", "amount": "Volume"})
+            df["Date"] = pd.to_datetime(df["Date"])
+            df = df.set_index("Date")[["Open", "High", "Low", "Close", "Volume"]]
             cb.record_success()
             return df
         cb.record_success()
@@ -471,14 +497,14 @@ def fill_business_ths(code: str, info: dict) -> None:
 
 
 def get_financial_data_em(code: str, statement_type: str = "all") -> pd.DataFrame:
-    """从东方财富获取财务报表，按报表类型路由到不同API。
-    东方财富纯HTTP接口，不依赖 py_mini_racer，不会崩溃。
+    """从东方财富获取财务报表（纯HTTP，不依赖 py_mini_racer）。
+    注：东方财富 API 返回全部历史数据，akshare 不支持日期过滤，
+    这里拉取后只保留最近 8 个季度（2 年），减少后续处理开销。
     """
     cb = CircuitBreaker.get("em_financial")
     if not cb.allow_request():
         return pd.DataFrame()
 
-    # 东方财富格式: 600519.SH / 000001.SZ
     symbol = f"{code}.{'SH' if code.startswith('6') else 'SZ'}"
 
     try:
@@ -496,7 +522,7 @@ def get_financial_data_em(code: str, statement_type: str = "all") -> pd.DataFram
 
         if not df.empty:
             cb.record_success()
-            return df
+            return df.head(8)
     except Exception as e:
         cb.record_failure(str(e))
         return pd.DataFrame()

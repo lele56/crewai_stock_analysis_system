@@ -10,14 +10,50 @@ from src.tools.reporting_tools import BaseTool
 
 logger = logging.getLogger(__name__)
 
+# 模块级缓存，避免同一进程内重复调 API
+_financial_api_cache: dict[str, dict] = {}
+
+
+def _enrich_market_data(ticker: str, data: dict[str, float]) -> None:
+    """从 stock_cache 的 info 补充市场数据（PE/PB/市值/当前价格），不覆盖已有字段"""
+    try:
+        from src.tools.akshare_data_parser import load_stock_cache
+
+        cache = load_stock_cache(ticker)
+        if not cache:
+            return
+        info = cache.get("info", {})
+        if not info:
+            return
+
+        _mappings = [
+            ("trailingPE", "pe_ratio"),
+            ("priceToBook", "pb_ratio"),
+            ("marketCap", "market_cap"),
+            ("currentPrice", "current_price"),
+        ]
+        for info_key, data_key in _mappings:
+            if data_key in data:
+                continue
+            val = info.get(info_key)
+            if val is not None and val != "N/A":
+                try:
+                    fval = float(val)
+                    if fval > 0:
+                        data[data_key] = fval
+                except (ValueError, TypeError):
+                    pass
+    except Exception as e:
+        logger.debug("补充市场数据失败: %s", str(e)[:50])
+
 
 class FinancialCalculatorTool(BaseTool):
     """金融计算器工具 — 优先从 API 直接获取财务数据，兜底用正则从文本提取"""
 
     name: str = "Financial Calculator Tool"
     description: str = (
-        "计算财务指标和比率。传 ticker 可直接从 API 获取真实财务数据（推荐），"
-        "传 financial_data 则从文本中提取。参数: ticker(股票代码), financial_data(可选文本), calculation_type"
+        "计算财务指标和比率。参数: ticker(股票代码), financial_data(可选文本), "
+        "calculation_type(可选: liquidity,profitability,leverage,growth,dcf,valuation,all)"
     )
 
     def _run(
@@ -34,9 +70,12 @@ class FinancialCalculatorTool(BaseTool):
                 if data:
                     logger.info("从 API 获取财务数据成功，跳过文本解析")
 
-            # 兜底：从文本中提取
-            if not data and financial_data and financial_data.strip():
-                data = self._parse_financial_data(financial_data)
+            # 兜底：从文本中提取（兼容 CrewAI 可能传入 dict 的情况）
+            if not data and financial_data:
+                if isinstance(financial_data, dict):
+                    data = financial_data
+                elif isinstance(financial_data, str) and financial_data.strip():
+                    data = self._parse_financial_data(financial_data)
 
             if not data:
                 logger.warning("财务数据为空，无法计算")
@@ -47,22 +86,24 @@ class FinancialCalculatorTool(BaseTool):
             results = {}
 
             ct = calculation_type.lower()
-            if ct in ("liquidity", "all"):
+            calc_types = set(t.strip() for t in ct.split(",") if t.strip())
+
+            if "liquidity" in calc_types or "all" in calc_types:
                 results["liquidity_ratios"] = self._calculate_liquidity_ratios(data)
 
-            if ct in ("profitability", "all"):
+            if "profitability" in calc_types or "all" in calc_types:
                 results["profitability_ratios"] = self._calculate_profitability_ratios(data)
 
-            if ct in ("leverage", "all"):
+            if "leverage" in calc_types or "all" in calc_types:
                 results["leverage_ratios"] = self._calculate_leverage_ratios(data)
 
-            if ct in ("growth", "all"):
+            if "growth" in calc_types or "all" in calc_types:
                 results["growth_rates"] = self._calculate_growth_rates(data)
 
-            if ct in ("dcf", "dcf_valuation", "dcf valuation calculation", "all"):
+            if "dcf" in calc_types or "all" in calc_types:
                 results["dcf_valuation"] = self._calculate_dcf(data)
 
-            if ct in ("valuation", "valuation_analysis", "all"):
+            if "valuation" in calc_types or "all" in calc_types:
                 results["valuation_ratios"] = self._calculate_valuation_ratios(data)
 
             report = self._generate_financial_report(results)
@@ -89,74 +130,125 @@ class FinancialCalculatorTool(BaseTool):
         return {"raw": financial_data}
 
     @staticmethod
-    def _fetch_financial_from_api(ticker: str) -> dict:
-        """获取财务数据：优先缓存，缓存未命中则直接调 API"""
-        from src.tools.akshare_data_parser import load_financial_from_cache
-
-        data = load_financial_from_cache(ticker)
-        if data:
-            return data
-
+    def _find_yoy_previous(records: list[dict]) -> dict | None:
+        """从 record 列表中找同比（同月）上一期数据。
+        records[0] 是最新一期，返回同月的前一年记录；找不到则返回 records[1]。
+        """
+        if len(records) < 2:
+            return None
+        current = records[0]
+        date_str = current.get("REPORT_DATE", "") or current.get("报告期", "") or current.get("report_date", "")
+        if not date_str:
+            return records[1]
         try:
-            from src.tools.akshare_data_parser import get_financial_statements, _safe_float
+            dt = datetime.strptime(str(date_str)[:10], "%Y-%m-%d")
+            target_month = dt.month
+            target_year = dt.year - 1
+            for record in records[1:]:
+                rd = record.get("REPORT_DATE", "") or record.get("报告期", "") or record.get("report_date", "")
+                if not rd:
+                    continue
+                try:
+                    rd_dt = datetime.strptime(str(rd)[:10], "%Y-%m-%d")
+                    if rd_dt.month == target_month and rd_dt.year == target_year:
+                        return record
+                except ValueError:
+                    continue
+        except (ValueError, IndexError):
+            pass
+        return records[1]
 
-            result: dict[str, float] = {}
-            for stype, sections in [("利润表", ["financials"]), ("资产负债表", ["balance_sheet"]), ("现金流量表", ["cashflow"])]:
-                df = get_financial_statements(ticker, stype)
-                if not df.empty:
-                    record = df.iloc[0].to_dict()
-                    for k, v in record.items():
-                        val = _safe_float(v)
-                        if val is not None:
-                            result[k] = val
+    @staticmethod
+    def _fetch_financial_from_api(ticker: str) -> dict:
+        """获取财务数据：优先三级缓存，缓存未命中则调 API 并回写缓存；
+        同时补充市场数据（PE/PB/市值/价格）供估值和 DCF 使用"""
+        from src.tools.akshare_data_parser import (
+            load_financial_from_cache, load_stock_cache,
+            save_financial_cache, get_financial_statements, _safe_float,
+            _FINANCIAL_KEY_MAP, _FINANCIAL_PREV_MAP,
+        )
 
-            _key_map = {
-                # 利润表
-                "TOTAL_OPERATE_INCOME": "revenue", "OPERATE_INCOME": "revenue",
-                "NETPROFIT": "net_income", "PARENT_NETPROFIT": "net_income",
-                "OPERATE_PROFIT": "operating_profit",
-                "OPERATE_COST": "operating_cost",
-                "SALE_EXPENSE": "sale_expense",
-                "MANAGE_EXPENSE": "manage_expense",
-                "FINANCE_EXPENSE": "finance_expense",
-                "RESEARCH_EXPENSE": "research_expense",
-                "INTEREST_EXPENSE": "interest_expense",
-                "INCOME_TAX": "income_tax",
-                "TOTAL_OPERATE_COST": "total_operating_cost",
-                # 资产负债表
-                "ASSET_BALANCE": "total_assets",
-                "EQUITY_BALANCE": "equity",
-                "CURRENT_ASSET_BALANCE": "current_assets",
-                "CURRENT_LIAB_BALANCE": "current_liabilities",
-                "INVENTORY": "inventory",
-                "MONETARYFUNDS": "cash",
-                "LIAB_BALANCE": "total_debt",
-                "ACCOUNTS_RECE": "accounts_receivable",
-                "ACCOUNTS_PAYABLE": "accounts_payable",
-                "FIXED_ASSET": "fixed_assets",
-                "BORROW_FUND": "borrow_fund",
-                "SHORT_LOAN": "short_loan",
-                # 现金流量表
-                "NETCASH_OPERATE": "operating_cashflow",
-                "NETCASH_INVEST": "investing_cashflow",
-                "NETCASH_FINANCE": "financing_cashflow",
-                "TOTAL_OPERATE_INFLOW": "total_operating_inflow",
-                "TOTAL_OPERATE_OUTFLOW": "total_operating_outflow",
-                # 每股指标
-                "EPSJB": "eps",
-                "BPS": "bps",
-            }
-            for cn, en in _key_map.items():
-                if cn in result:
-                    result[en] = result[cn]
+        # L0: 模块级内存缓存（最快，避免重复调用 load_financial_from_cache）
+        if ticker in _financial_api_cache:
+            return _financial_api_cache[ticker]
 
-            if result:
-                logger.info("直接从 API 获取财务数据成功")
-                return result
-        except Exception as e:
-            logger.warning("直接调 API 获取财务数据失败: %s", str(e)[:80])
+        data: dict[str, float] = {}
 
-        return {}
+        # L1/L2: 三级缓存（内存 → Redis → 文件）
+        cached = load_financial_from_cache(ticker)
+        if cached:
+            data = cached
+            # 从主缓存补充上一期数据，用于增长率计算
+            if "previous_revenue" not in data:
+                stock_cache = load_stock_cache(ticker)
+                if stock_cache:
+                    for section in ["financials", "balance_sheet"]:
+                        records = stock_cache.get(section, [])
+                        if len(records) > 1:
+                            prev_row = FinancialCalculatorTool._find_yoy_previous(records)
+                            if prev_row is None:
+                                prev_row = records[1]
+                            for cn, en in _FINANCIAL_PREV_MAP.items():
+                                if cn in prev_row and en not in data:
+                                    val = _safe_float(prev_row[cn])
+                                    if val is not None:
+                                        data[en] = val
+
+        # L3: 直接调 API（key mapping 与 load_financial_from_cache 保持一致）
+        if not data:
+            try:
+                raw: dict[str, float] = {}
+                prev_raw: dict[str, float] = {}
+                for stype in ["利润表", "资产负债表", "现金流量表"]:
+                    df = get_financial_statements(ticker, stype)
+                    if not df.empty:
+                        record = df.iloc[0].to_dict()
+                        for k, v in record.items():
+                            val = _safe_float(v)
+                            if val is not None:
+                                raw[k] = val
+                        # 上一期数据（同比匹配，用于增长率计算）
+                        if len(df) > 1:
+                            records = df.reset_index().to_dict(orient="records")
+                            # 确保 REPORT_DATE 在 records 中
+                            if "REPORT_DATE" not in records[0] and df.index.name == "REPORT_DATE":
+                                for i, rec in enumerate(records):
+                                    rec["REPORT_DATE"] = str(df.index[i])
+                            prev_record = FinancialCalculatorTool._find_yoy_previous(records)
+                            if prev_record is None:
+                                prev_record = df.iloc[1].to_dict()
+                            for k, v in prev_record.items():
+                                pval = _safe_float(v)
+                                if pval is not None:
+                                    prev_raw[k] = pval
+
+                for cn, en in _FINANCIAL_KEY_MAP.items():
+                    if cn in raw:
+                        data[en] = raw[cn]
+
+                # 上一期数据映射（使用模块级共享 _FINANCIAL_PREV_MAP）
+                for cn, en in _FINANCIAL_PREV_MAP.items():
+                    if cn in prev_raw:
+                        data[en] = prev_raw[cn]
+
+                # 毛利 = 营收 - 营业成本
+                revenue = data.get("revenue", 0)
+                operating_cost = data.get("operating_cost", 0)
+                if revenue > 0 and operating_cost > 0:
+                    data["gross_profit"] = revenue - operating_cost
+
+                if data:
+                    save_financial_cache(ticker, data)
+                    logger.info("直接从 API 获取财务数据成功")
+            except Exception as e:
+                logger.warning("直接调 API 获取财务数据失败: %s", str(e)[:80])
+
+        # 补充市场数据（PE/PB/市值/当前价格），从 stock_cache 的 info 中提取
+        if data:
+            _enrich_market_data(ticker, data)
+            _financial_api_cache[ticker] = data
+
+        return data
 
     def _parse_report_text(self, text: str) -> dict:
         """从股票数据报告文本中提取结构化财务数据"""
@@ -195,9 +287,9 @@ class FinancialCalculatorTool(BaseTool):
         result["investing_cashflow"] = _extract_number(r"投资活动现金流量净额\**[：:]\s*([\d,-]+\.?\d*)")
         result["financing_cashflow"] = _extract_number(r"筹资活动现金流量净额\**[：:]\s*([\d,-]+\.?\d*)")
 
-        ebit = _extract_number(r"营业利润\**[：:]\s*([\d,]+\.?\d*)")
-        if ebit > 0:
-            result["ebit"] = ebit
+        operating_profit = _extract_number(r"营业利润\**[：:]\s*([\d,]+\.?\d*)")
+        if operating_profit > 0:
+            result["operating_profit"] = operating_profit
         result["interest_expense"] = _extract_number(r"利息费用\**[：:]\s*([\d,]+\.?\d*)")
 
         mktcap = _extract_number(r"市值\**[：:]\s*¥?([\d,]+\.?\d*)")
@@ -216,7 +308,7 @@ class FinancialCalculatorTool(BaseTool):
         if pb > 0:
             result["pb_ratio"] = pb
 
-        period_return = _extract_number(r"期间涨幅\**[：:]\s*([\d.-]+)%")
+        period_return = _extract_number(r"(?:期间)?涨幅\**[：:]\s*([\d.-]+)%")
         if "period_return" not in result:
             result["period_return"] = period_return
 
@@ -301,11 +393,11 @@ class FinancialCalculatorTool(BaseTool):
             if equity > 0:
                 ratios["equity_multiplier"] = total_assets / equity
 
-            # 利息保障倍数
-            ebit = data.get("ebit", 0)
+            # 利息保障倍数 = 营业利润 / 利息费用
+            operating_profit = data.get("operating_profit", 0)
             interest_expense = data.get("interest_expense", 0)
             if interest_expense > 0:
-                ratios["interest_coverage"] = ebit / interest_expense
+                ratios["interest_coverage"] = operating_profit / interest_expense
 
         except Exception as e:
             logger.error(f"计算杠杆比率失败: {str(e)}")
@@ -327,10 +419,10 @@ class FinancialCalculatorTool(BaseTool):
             if previous_net_income > 0:
                 rates["net_income_growth"] = ((current_net_income - previous_net_income) / previous_net_income) * 100
 
-            current_assets = data.get("current_assets", 0)
-            previous_assets = data.get("previous_assets", 0)
+            total_assets_current = data.get("total_assets", 0)
+            previous_assets = data.get("previous_total_assets", 0)
             if previous_assets > 0:
-                rates["asset_growth"] = ((current_assets - previous_assets) / previous_assets) * 100
+                rates["asset_growth"] = ((total_assets_current - previous_assets) / previous_assets) * 100
 
             period_return = data.get("period_return", 0)
             if period_return != 0:
@@ -342,7 +434,7 @@ class FinancialCalculatorTool(BaseTool):
         return rates
 
     def _calculate_dcf(self, data: dict) -> dict[str, float]:
-        """简化DCF估值模型"""
+        """简化DCF估值模型（全公司口径：总FCF → 总内在价值）"""
         dcf = {}
         try:
             fcf = data.get("operating_cashflow", 0) or data.get("net_income", 0) * 0.8
@@ -351,8 +443,10 @@ class FinancialCalculatorTool(BaseTool):
                 projected_fcf = fcf * (1 + growth_rate) ** 5
                 terminal_value = projected_fcf * 15
                 dcf["estimated_intrinsic_value"] = terminal_value / (1.1 ** 5)
-                if data.get("current_price", 0) > 0:
-                    dcf["price_to_intrinsic"] = data["current_price"] / dcf["estimated_intrinsic_value"]
+                # 用总市值/总内在价值，而非每股价格（DCF 是全公司口径）
+                market_cap = data.get("market_cap", 0)
+                if market_cap > 0:
+                    dcf["price_to_intrinsic"] = market_cap / dcf["estimated_intrinsic_value"]
         except Exception as e:
             logger.error(f"DCF估值计算失败: {str(e)}")
         return dcf
@@ -375,6 +469,21 @@ class FinancialCalculatorTool(BaseTool):
 
     def _generate_financial_report(self, results: dict) -> str:
         """生成财务指标报告（精简版，避免 LLM 上下文溢出）"""
+        _pct_keys = {"roa", "roe", "debt_to_assets", "price_return"}
+
+        def _fmt(ratio_name: str, value: float) -> str:
+            if "growth" in ratio_name or "margin" in ratio_name or ratio_name in _pct_keys:
+                return f"{value:.2f}%"
+            if ratio_name == "estimated_intrinsic_value":
+                if abs(value) >= 1e8:
+                    return f"{value / 1e8:.2f}亿"
+                if abs(value) >= 1e4:
+                    return f"{value / 1e4:.2f}万"
+                return f"{value:.2f}"
+            if ratio_name == "price_to_intrinsic":
+                return f"{value:.4f}"
+            return f"{value:.2f}"
+
         lines = []
         for category, ratios in results.items():
             if not ratios:
@@ -383,10 +492,7 @@ class FinancialCalculatorTool(BaseTool):
             items = []
             for ratio_name, value in ratios.items():
                 name = self._translate_ratio_name(ratio_name)
-                if "growth" in ratio_name or "margin" in ratio_name or ratio_name in ("roa", "roe"):
-                    items.append(f"{name}: {value:.2f}%")
-                else:
-                    items.append(f"{name}: {value:.2f}")
+                items.append(f"{name}: {_fmt(ratio_name, value)}")
             if items:
                 lines.append(f"{cat_name}: " + ", ".join(items))
         return "\n".join(lines) if lines else "无可用数据"
@@ -407,46 +513,16 @@ class FinancialCalculatorTool(BaseTool):
             "revenue_growth": "营收增长率",
             "net_income_growth": "净利润增长率",
             "asset_growth": "资产增长率",
+            "price_return": "价格涨幅",
+            # DCF / 估值
+            "estimated_intrinsic_value": "估算内在价值",
+            "price_to_intrinsic": "价格/内在价值比",
+            "pe_ratio": "市盈率",
+            "pb_ratio": "市净率",
+            "market_cap_to_net_income": "市值/净利润",
+            "ps_ratio": "市销率",
         }
         return translations.get(ratio_name, ratio_name)
-
-    def _generate_analysis_suggestions(self, results: dict) -> str:
-        """生成分析建议"""
-        suggestions = "## 分析建议\n\n"
-
-        # 流动性分析
-        liquidity = results.get("liquidity_ratios", {})
-        current_ratio = liquidity.get("current_ratio", 0)
-        if current_ratio < 1:
-            suggestions += "- **流动性风险**: 流动比率低于1，可能存在短期偿债压力\n"
-        elif current_ratio > 2:
-            suggestions += "- **资金利用**: 流动比率较高，可考虑提高资金使用效率\n"
-
-        # 盈利能力分析
-        profitability = results.get("profitability_ratios", {})
-        net_margin = profitability.get("net_margin", 0)
-        if net_margin < 5:
-            suggestions += "- **盈利能力**: 净利率较低，需要提高盈利能力\n"
-        elif net_margin > 20:
-            suggestions += "- **盈利能力**: 净利率表现优秀，具有较强的竞争优势\n"
-
-        # 杠杆分析
-        leverage = results.get("leverage_ratios", {})
-        debt_to_assets = leverage.get("debt_to_assets", 0)
-        if debt_to_assets > 70:
-            suggestions += "- **财务风险**: 资产负债率较高，财务风险需要关注\n"
-        elif debt_to_assets < 30:
-            suggestions += "- **财务保守**: 资产负债率较低，可考虑适度增加财务杠杆\n"
-
-        # 增长分析
-        growth = results.get("growth_rates", {})
-        revenue_growth = growth.get("revenue_growth", 0)
-        if revenue_growth > 20:
-            suggestions += "- **增长强劲**: 营收增长率较高，业务发展良好\n"
-        elif revenue_growth < 0:
-            suggestions += "- **增长停滞**: 营收出现负增长，需要关注业务发展\n"
-
-        return suggestions
 
 
 # 使用示例

@@ -34,7 +34,7 @@ _INDEX_CACHE_TTL = 300  # 5 分钟
 
 def _fetch_index_data() -> dict[str, dict]:
     """获取 A 股主要指数最新行情（5 分钟缓存）
-    主源: stock_zh_index_daily → 替补: stock_zh_index_daily_tx (腾讯)
+    主源: stock_zh_index_daily_tx (腾讯，纯HTTP，不依赖 py_mini_racer)
     """
     global _INDEX_CACHE, _INDEX_CACHE_TS
 
@@ -50,9 +50,7 @@ def _fetch_index_data() -> dict[str, dict]:
         result = {}
         for name, code in _A_INDEX_MAP.items():
             try:
-                df = ak.stock_zh_index_daily(symbol=code)
-                if df.empty:
-                    df = get_index_daily_tx(code)
+                df = get_index_daily_tx(code)
                 if not df.empty:
                     latest = df.iloc[-1]
                     prev = df.iloc[-2] if len(df) >= 2 else latest

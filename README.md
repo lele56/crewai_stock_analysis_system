@@ -68,6 +68,63 @@
 
 ## 🔄 核心流程
 
+### 数据管线架构（v1.2 重构）
+
+系统采用**三级数据传递管道**，确保每个 Agent 都拿到真实数据而非凭空编造：
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          数据管线 (Data Pipeline)                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐       │
+│  │ 数据采集 Crew     │───▶│ 分析 Crew         │───▶│ 决策 Crew         │       │
+│  │                  │    │                  │    │                  │       │
+│  │ 产出:             │    │ 接收: {raw_data}  │    │ 接收: {scores}    │       │
+│  │ · 市场数据        │    │ · 真实采集数据    │    │ · 协作评分        │       │
+│  │ · 财务报表        │    │                  │    │ {analysis_outputs}│       │
+│  │ · 技术指标        │    │ 产出:             │    │ · 各专家分析文本  │       │
+│  │                  │    │ · agent_outputs   │    │ {analysis_recs}   │       │
+│  │                  │    │ · collaboration   │    │ · 最终建议        │       │
+│  └──────────────────┘    │   _scores         │    │                  │       │
+│         │                └──────────────────┘    └──────────────────┘       │
+│         │                       │                       │                  │
+│         ▼                       ▼                       ▼                  │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                    State 存储 (AnalysisState)                        │  │
+│  │  _collection_data → _get_latest_data_collection_result()            │  │
+│  │  _analysis_result  → _get_latest_analysis_result()                  │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│  ⚠️ 关键原则：所有 Agent 通过 State 传递真实数据，禁止硬编码假数据              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 财务数据采集架构
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       财务数据三级缓存架构                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  akshare API (东方财富)                                                      │
+│       │                                                                     │
+│       ▼                                                                     │
+│  ┌──────────────┐    ┌─────────────────┐    ┌──────────────┐               │
+│  │ 内存缓存 (L0) │───▶│ Redis 缓存 (L1)  │───▶│ 文件缓存 (L2) │               │
+│  │ 进程级/瞬时   │    │ 跨进程/持久     │    │ 独立落盘      │               │
+│  └──────────────┘    └─────────────────┘    └──────────────┘               │
+│                                                    │                       │
+│  独立财务缓存 (_save_financial_fallback)            │                       │
+│  ┌─────────────────────────────────────────────────┘                       │
+│  │ 与 K 线校验解耦，确保财务数据不因 K 线过期而丢失                            │
+│  │ 共享 Key 映射: _FINANCIAL_KEY_MAP (37 字段)                              │
+│  │ 上一期映射: _FINANCIAL_PREV_MAP (5 字段，支持增长率计算)                    │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
 ### 1. 单股票分析流程
 
 ```
@@ -511,6 +568,11 @@ pip install akshare
 OPENAI_API_KEY=your-openai-api-key-here
 OPENAI_MODEL_NAME=gpt-4o
 OPENAI_BASE_URL=https://api.openai.com/v1
+
+# LLM 调用配置
+LLM_TEMPERATURE=0.1
+LLM_MAX_TOKENS=4096
+LLM_TIMEOUT=120  # HTTP 请求超时（秒），防止 Agent 无限等待
 
 # 模型故障转移（主模型配额耗尽时自动切换）
 LLM_FALLBACK=
@@ -974,35 +1036,14 @@ python -m pytest tests/test_data_types.py -v
 - 手动数据修正
 - 质量监控报警
 
-## 🤝 贡献指南
+## 🤝 关于本项目
 
-### 1. 开发环境设置
-```bash
-# 克隆项目
-git clone <repository-url>
-cd crewai
+本项目基于 CrewAI 开源框架构建，是一个 AI 驱动的股票分析实验项目。
 
-# 创建虚拟环境
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-venv\Scripts\activate     # Windows
-
-# 安装开发依赖
-pip install -r requirements-dev.txt
-```
-
-### 2. 代码规范
-- 遵循PEP 8代码规范
-- 使用类型注解
-- 编写单元测试
-- 添加文档注释
-
-### 3. 提交流程
-1. Fork 项目
-2. 创建功能分支
-3. 提交代码变更
-4. 创建 Pull Request
-5. 代码审查和合并
+### 项目说明
+- 如需使用，请 Fork 后自行修改适配
+- 欢迎提交 Issue 讨论，但 PR 可能不会被及时处理
+- 核心依赖：CrewAI、AkShare、OpenAI 兼容 API
 
 ## 📄 许可证
 
@@ -1014,13 +1055,7 @@ pip install -r requirements-dev.txt
 - [OpenAI](https://openai.com/) - AI模型支持
 - [AkShare](https://github.com/akfamily/akshare) - 金融数据获取
 - [Serper](https://serper.dev/) - 搜索API服务
-
-## 📞 支持和反馈
-
-- 📧 邮箱支持：[support@example.com](mailto:support@example.com)
-- 🐛 问题报告：[GitHub Issues](https://github.com/your-repo/issues)
-- 📖 文档：[项目Wiki](https://github.com/your-repo/wiki)
-- 💬 社区讨论：[GitHub Discussions](https://github.com/your-repo/discussions)
+- [东方财富](https://www.eastmoney.com/) - A股财务数据源
 
 ---
 
@@ -1038,6 +1073,6 @@ pip install -r requirements-dev.txt
 
 ---
 
-*最后更新时间：2026-07-16*
-*版本号：v1.0.0*
+*最后更新时间：2026-07-17*
+*版本号：v1.2.0*
 *维护者：CrewAI股票分析系统团队*

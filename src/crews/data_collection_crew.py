@@ -114,6 +114,7 @@ class DataCollectionCrew:
             logger.info(f"任务完成，执行时间: {execution_time:.2f} 秒")
 
             return {
+                "success": True,
                 "status": "success",
                 "result": result,
                 "company": company,

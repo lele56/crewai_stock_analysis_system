@@ -171,29 +171,29 @@ except Exception:
 def _validate_stock_data(
     name: str, hist: pd.DataFrame, financials: pd.DataFrame,
     balance_sheet: pd.DataFrame, info: dict,
-) -> bool:
-    """校验数据质量，拒绝缓存垃圾数据"""
+) -> pd.DataFrame | None:
+    """校验数据质量，返回清洗后的 hist；不合格返回 None"""
     # K线检查
     if hist.empty:
         logger.warning(f"缓存校验 [{name}]: K线为空，跳过缓存")
-        return False
+        return None
     if len(hist) < 10:
         logger.warning(f"缓存校验 [{name}]: K线仅 {len(hist)} 条，数据不足，跳过缓存")
-        return False
+        return None
     required_cols = {"Open", "High", "Low", "Close", "Volume"}
     missing = required_cols - set(hist.columns)
     if missing:
         logger.warning(f"缓存校验 [{name}]: K线缺少列 {missing}，跳过缓存")
-        return False
+        return None
     if hist["Close"].sum() == 0:
         logger.warning(f"缓存校验 [{name}]: K线收盘价全为0，跳过缓存")
-        return False
+        return None
     if pd.isna(hist["Close"].iloc[-1]):
         logger.warning(f"缓存校验 [{name}]: 最新收盘价为NaN，跳过缓存")
-        return False
+        return None
     if (hist["Close"] < 0).any():
         logger.warning(f"缓存校验 [{name}]: K线存在负价格，跳过缓存")
-        return False
+        return None
 
     # OHLC 逻辑一致性：High >= Low, High >= Open/Close, Low <= Open/Close
     bad_rows = hist[
@@ -210,7 +210,7 @@ def _validate_stock_data(
             f"缓存校验 [{name}]: OHLC 逻辑异常 {bad_count}/{total} 行，"
             f"跳过缓存"
         )
-        return False
+        return None
     elif bad_count > 0:
         logger.info(
             f"缓存校验 [{name}]: OHLC 逻辑异常 {bad_count}/{total} 行（<10%），"
@@ -233,7 +233,7 @@ def _validate_stock_data(
     if hist.index.duplicated().any():
         dup_count = hist.index.duplicated().sum()
         logger.warning(f"缓存校验 [{name}]: K线存在 {dup_count} 个重复日期，跳过缓存")
-        return False
+        return None
 
     # 财务检查
     fin_empty = financials.empty and balance_sheet.empty
@@ -241,7 +241,7 @@ def _validate_stock_data(
         logger.info(f"缓存校验 [{name}]: 财务数据为空（非关键），继续缓存")
     else:
         if not financials.empty:
-            for col in ["营业总收入", "营业收入", "净利润"]:
+            for col in ["TOTAL_OPERATE_INCOME", "OPERATE_INCOME", "NETPROFIT", "PARENT_NETPROFIT"]:
                 if col in financials.columns:
                     val = financials[col].iloc[0] if len(financials) > 0 else 0
                     if val and val != 0:
@@ -252,15 +252,15 @@ def _validate_stock_data(
         # 财务逻辑一致性：营收 > 0 但资产总计 = 0 不合理
         if not financials.empty and not balance_sheet.empty:
             revenue = 0.0
-            for col in ["营业总收入", "营业收入"]:
+            for col in ["TOTAL_OPERATE_INCOME", "OPERATE_INCOME"]:
                 if col in financials.columns:
                     rv = _safe_float(financials[col].iloc[0])
                     if rv:
                         revenue = rv
                     break
             total_assets = 0.0
-            if "资产总计" in balance_sheet.columns:
-                ta = _safe_float(balance_sheet["资产总计"].iloc[0])
+            if "TOTAL_ASSETS" in balance_sheet.columns:
+                ta = _safe_float(balance_sheet["TOTAL_ASSETS"].iloc[0])
                 if ta:
                     total_assets = ta
             if revenue > 0 and total_assets == 0:
@@ -271,9 +271,9 @@ def _validate_stock_data(
     # 公司信息检查
     if not info or len(info) < 2:
         logger.warning(f"缓存校验 [{name}]: 公司信息不足，跳过缓存")
-        return False
+        return None
 
-    return True
+    return hist
 
 
 def _is_cache_fresh(cache: dict) -> bool:
@@ -297,6 +297,29 @@ def _is_cache_fresh(cache: dict) -> bool:
         return False
 
 
+def _save_financial_fallback(
+    ticker: str,
+    financials: pd.DataFrame,
+    balance_sheet: pd.DataFrame,
+    cashflow: pd.DataFrame,
+) -> None:
+    """将财务数据写入独立缓存（与 K 线校验解耦，确保财务数据不丢失）"""
+    try:
+        data: dict[str, float] = {}
+        for df in [financials, balance_sheet, cashflow]:
+            if df.empty:
+                continue
+            record = df.iloc[0].to_dict()
+            for k, v in record.items():
+                val = _safe_float(v)
+                if val is not None and k in _FINANCIAL_KEY_MAP:
+                    data[_FINANCIAL_KEY_MAP[k]] = val
+        if data:
+            save_financial_cache(ticker, data)
+    except Exception as e:
+        logger.debug("财务缓存写入失败: %s", str(e)[:50])
+
+
 def _save_stock_cache(
     ticker: str,
     hist: pd.DataFrame,
@@ -305,8 +328,14 @@ def _save_stock_cache(
     cashflow: pd.DataFrame,
     info: dict,
 ) -> None:
-    """三层缓存写入：内存 → Redis → 文件"""
-    if not _validate_stock_data(ticker, hist, financials, balance_sheet, info):
+    """三层缓存写入：内存 → Redis → 文件。
+    财务数据总是写入独立缓存（不依赖K线校验），主缓存仅在校验通过后写入。
+    """
+    # 财务数据总是落盘（独立于K线校验）
+    _save_financial_fallback(ticker, financials, balance_sheet, cashflow)
+
+    hist = _validate_stock_data(ticker, hist, financials, balance_sheet, info)
+    if hist is None:
         return
 
     try:
@@ -315,7 +344,7 @@ def _save_stock_cache(
         def _df_to_records(df: pd.DataFrame) -> list[dict]:
             if df.empty:
                 return []
-            df = df.reset_index()
+            df = df.copy().reset_index()
             for col in df.columns:
                 if pd.api.types.is_datetime64_any_dtype(df[col]):
                     df[col] = df[col].astype(str)
@@ -325,7 +354,8 @@ def _save_stock_cache(
             "ticker": ticker,
             "cached_at": datetime.now().isoformat(),
             "validated": True,
-            "info": {k: str(v) for k, v in info.items()},
+            "info": {k: (v if isinstance(v, (int, float, bool)) or v is None else str(v))
+                     for k, v in info.items()},
             "kline": _df_to_records(hist),
             "financials": _df_to_records(financials),
             "balance_sheet": _df_to_records(balance_sheet),
@@ -420,72 +450,149 @@ def load_kline_from_cache(ticker: str) -> pd.DataFrame | None:
     return df
 
 
+# ── 财务数据独立缓存（不依赖 K 线校验，避免缓存链路断裂）─────────────────
+
+_FINANCIAL_CACHE_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "financial_cache"
+)
+
+# ═══════════════════════════════════════════════════════════════════
+# 共享 key map：东方财富列名 → 标准英文 key（唯一数据源，所有模块共用）
+# ═══════════════════════════════════════════════════════════════════
+
+_FINANCIAL_KEY_MAP: dict[str, str] = {
+    # 利润表
+    "TOTAL_OPERATE_INCOME": "revenue", "OPERATE_INCOME": "revenue",
+    "NETPROFIT": "net_income", "PARENT_NETPROFIT": "net_income",
+    "OPERATE_PROFIT": "operating_profit",
+    "OPERATE_COST": "operating_cost",
+    "SALE_EXPENSE": "sale_expense",
+    "MANAGE_EXPENSE": "manage_expense",
+    "FINANCE_EXPENSE": "finance_expense",
+    "RESEARCH_EXPENSE": "research_expense",
+    "INTEREST_EXPENSE": "interest_expense",
+    "INCOME_TAX": "income_tax",
+    "TOTAL_OPERATE_COST": "total_operating_cost",
+    # 资产负债表（东方财富 TOTAL_ 前缀才是真实值，_BALANCE 后缀全为 0）
+    "TOTAL_ASSETS": "total_assets",
+    "TOTAL_EQUITY": "equity",
+    "TOTAL_CURRENT_ASSETS": "current_assets",
+    "TOTAL_CURRENT_LIAB": "current_liabilities",
+    "INVENTORY": "inventory",
+    "MONETARYFUNDS": "cash",
+    "TOTAL_LIABILITIES": "total_debt",
+    "ACCOUNTS_RECE": "accounts_receivable",
+    "ACCOUNTS_PAYABLE": "accounts_payable",
+    "FIXED_ASSET": "fixed_assets",
+    "GOODWILL": "goodwill",
+    "SHORT_LOAN": "short_loan",
+    "LONG_LOAN": "long_loan",
+    "BORROW_FUND": "borrow_fund",
+    "TOTAL_PARENT_EQUITY": "parent_equity",
+    "TOTAL_NONCURRENT_ASSETS": "noncurrent_assets",
+    "TOTAL_NONCURRENT_LIAB": "noncurrent_liabilities",
+    # 现金流量表
+    "NETCASH_OPERATE": "operating_cashflow",
+    "NETCASH_INVEST": "investing_cashflow",
+    "NETCASH_FINANCE": "financing_cashflow",
+    "TOTAL_OPERATE_INFLOW": "total_operating_inflow",
+    "TOTAL_OPERATE_OUTFLOW": "total_operating_outflow",
+    # 每股指标
+    "EPSJB": "eps",
+    "BPS": "bps",
+}
+
+# 上一期数据映射（同比/环比用，仅映射增长率需要的字段）
+_FINANCIAL_PREV_MAP: dict[str, str] = {
+    "TOTAL_OPERATE_INCOME": "previous_revenue",
+    "OPERATE_INCOME": "previous_revenue",
+    "NETPROFIT": "previous_net_income",
+    "PARENT_NETPROFIT": "previous_net_income",
+    "TOTAL_ASSETS": "previous_total_assets",
+}
+
+
+def save_financial_cache(ticker: str, data: dict[str, float]) -> None:
+    """保存财务数据到独立文件缓存（仅英文 key，不依赖 K 线）"""
+    if not data:
+        return
+    try:
+        os.makedirs(_FINANCIAL_CACHE_DIR, exist_ok=True)
+        cache_path = os.path.join(_FINANCIAL_CACHE_DIR, f"{ticker}.json")
+        payload = {
+            "ticker": ticker,
+            "cached_at": datetime.now().isoformat(),
+            "data": data,
+        }
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        logger.info(f"财务缓存已保存: {ticker} ({len(data)} 个字段)")
+    except Exception as e:
+        logger.warning(f"财务缓存保存失败: {e}")
+
+
+def load_financial_cache_file(ticker: str) -> dict[str, float] | None:
+    """从独立文件缓存读取财务数据，过期时间 24 小时"""
+    cache_path = os.path.join(_FINANCIAL_CACHE_DIR, f"{ticker}.json")
+    if not os.path.exists(cache_path):
+        return None
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        cached_at = datetime.fromisoformat(payload.get("cached_at", "2000-01-01"))
+        if (datetime.now() - cached_at).total_seconds() > 86400:
+            logger.info(f"财务缓存过期: {ticker}")
+            return None
+        data = payload.get("data", {})
+        if data:
+            # 兼容旧缓存（可能存了中文 key），只保留浮点值
+            return {k: float(v) for k, v in data.items() if v is not None}
+    except Exception as e:
+        logger.warning(f"读取财务缓存失败: {e}")
+    return None
+
+
 def load_financial_from_cache(ticker: str) -> dict:
-    """从缓存读取财务数据为扁平字典"""
+    """从缓存读取财务数据为扁平字典（主缓存 → 财务独立缓存）"""
+    # 优先：主缓存（K 线 + 财务 + 信息）
     cache = load_stock_cache(ticker)
-    if not cache:
-        return {}
+    if cache:
+        result: dict[str, float] = {}
+        for section in ["financials", "balance_sheet", "cashflow"]:
+            records = cache.get(section, [])
+            if records:
+                row = records[0]
+                for k, v in row.items():
+                    if v is not None and k not in ("index", "Date"):
+                        val = _safe_float(v)
+                        if val is not None:
+                            result[k] = val
 
-    result: dict[str, float] = {}
-    for section in ["financials", "balance_sheet", "cashflow"]:
-        records = cache.get(section, [])
-        if records:
-            row = records[0]
-            for k, v in row.items():
-                if v is not None and k not in ("index", "Date"):
-                    val = _safe_float(v)
-                    if val is not None:
-                        result[k] = val
+        # 映射为标准 key（使用模块级共享 _FINANCIAL_KEY_MAP）
+        for cn, en in _FINANCIAL_KEY_MAP.items():
+            if cn in result:
+                result[en] = result[cn]
 
-    # 映射为标准 key（东方财富英文列名）
-    _key_map = {
-        # 利润表
-        "TOTAL_OPERATE_INCOME": "revenue", "OPERATE_INCOME": "revenue",
-        "NETPROFIT": "net_income", "PARENT_NETPROFIT": "net_income",
-        "OPERATE_PROFIT": "operating_profit",
-        "OPERATE_COST": "operating_cost",
-        "SALE_EXPENSE": "sale_expense",
-        "MANAGE_EXPENSE": "manage_expense",
-        "FINANCE_EXPENSE": "finance_expense",
-        "RESEARCH_EXPENSE": "research_expense",
-        "INTEREST_EXPENSE": "interest_expense",
-        "INCOME_TAX": "income_tax",
-        "TOTAL_OPERATE_COST": "total_operating_cost",
-        # 资产负债表
-        "ASSET_BALANCE": "total_assets",
-        "EQUITY_BALANCE": "equity",
-        "CURRENT_ASSET_BALANCE": "current_assets",
-        "CURRENT_LIAB_BALANCE": "current_liabilities",
-        "INVENTORY": "inventory",
-        "MONETARYFUNDS": "cash",
-        "LIAB_BALANCE": "total_debt",
-        "ACCOUNTS_RECE": "accounts_receivable",
-        "ACCOUNTS_PAYABLE": "accounts_payable",
-        "FIXED_ASSET": "fixed_assets",
-        "GOODWILL": "goodwill",
-        "SHORT_LOAN": "short_loan",
-        "LONG_LOAN": "long_loan",
-        "BORROW_FUND": "borrow_fund",
-        # 现金流量表
-        "NETCASH_OPERATE": "operating_cashflow",
-        "NETCASH_INVEST": "investing_cashflow",
-        "NETCASH_FINANCE": "financing_cashflow",
-        "TOTAL_OPERATE_INFLOW": "total_operating_inflow",
-        "TOTAL_OPERATE_OUTFLOW": "total_operating_outflow",
-        # 每股指标
-        "EPSJB": "eps",
-        "BPS": "bps",
-    }
-    for cn, en in _key_map.items():
-        if cn in result:
-            result[en] = result[cn]
+        # 补算毛利（缓存不存储此项，营收和成本都有则自动计算）
+        if "gross_profit" not in result and result.get("revenue", 0) > 0 and result.get("operating_cost", 0) > 0:
+            result["gross_profit"] = result["revenue"] - result["operating_cost"]
 
-    logger.info(
-        "从缓存读取财务: revenue=%s, net_income=%s, total_assets=%s, equity=%s",
-        result.get("revenue", 0), result.get("net_income", 0),
-        result.get("total_assets", 0), result.get("equity", 0),
-    )
-    return result
+        logger.info(
+            "从主缓存读取财务: revenue=%s, net_income=%s, total_assets=%s, equity=%s",
+            result.get("revenue", 0), result.get("net_income", 0),
+            result.get("total_assets", 0), result.get("equity", 0),
+        )
+        return result
+
+    # 兜底：财务独立缓存（不依赖 K 线校验）
+    fallback = load_financial_cache_file(ticker)
+    if fallback:
+        if "gross_profit" not in fallback and fallback.get("revenue", 0) > 0 and fallback.get("operating_cost", 0) > 0:
+            fallback["gross_profit"] = fallback["revenue"] - fallback["operating_cost"]
+        logger.info("从财务独立缓存读取: %s", ticker)
+        return fallback
+
+    return {}
 
 
 def _safe_float(val) -> float | None:
@@ -549,13 +656,13 @@ def _extract_balance_sheet_metrics(balance_sheet: pd.DataFrame) -> dict[str, str
         return metrics
     try:
         col_map = {
-            "流动资产": ["CURRENT_ASSET_BALANCE"],
-            "流动负债": ["CURRENT_LIAB_BALANCE"],
-            "资产总计": ["ASSET_BALANCE"],
-            "负债合计": ["LIAB_BALANCE"],
+            "流动资产": ["TOTAL_CURRENT_ASSETS"],
+            "流动负债": ["TOTAL_CURRENT_LIAB"],
+            "资产总计": ["TOTAL_ASSETS"],
+            "负债合计": ["TOTAL_LIABILITIES"],
             "存货": ["INVENTORY"],
             "货币资金": ["MONETARYFUNDS"],
-            "股东权益": ["EQUITY_BALANCE"],
+            "股东权益": ["TOTAL_EQUITY"],
         }
         for metric_name, col_names in col_map.items():
             col = _find_column(balance_sheet, col_names)

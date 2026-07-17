@@ -22,7 +22,7 @@ def prepare_decision_inputs(analysis_result: dict) -> dict:
         "ticker": analysis_result.get("ticker", ""),
         "scores": analysis_result.get("collaboration_scores", {}),
         "analysis_recommendations": analysis_result.get("final_recommendation", {}),
-        "analysis_outputs": analysis_result.get("analysis_outputs", {}),
+        "analysis_outputs": analysis_result.get("agent_outputs", {}),
     }
 
 

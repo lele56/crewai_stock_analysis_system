@@ -50,6 +50,9 @@ class AnalysisState(BaseModel):
     decision_complexity: str = "standard"
     retry_attempts: dict[str, int] = {}
     alternative_paths: list[str] = []
+    # 数据传递：存储各阶段产出，供下游 agent 使用
+    _collection_data: dict[str, Any] = {}
+    _analysis_result: dict[str, Any] = {}
 
 
 class SmartInvestmentFlow(Flow[AnalysisState]):
@@ -113,7 +116,8 @@ class SmartInvestmentFlow(Flow[AnalysisState]):
         self.state.current_stage = "data_collection"
         try:
             result = self.data_collection_crew.execute_data_collection(self.state.company, self.state.ticker)
-            if result["success"]:
+            if result.get("success") or result.get("status") == "success":
+                self.state._collection_data = result  # 存储真实数据，供下游使用
                 quality = assess_data_quality(result)
                 self.state.data_quality = quality["overall_quality"]
                 self.state.data_completeness = quality["completeness"]
@@ -176,6 +180,7 @@ class SmartInvestmentFlow(Flow[AnalysisState]):
                 self.state.company, self.state.ticker, self._get_latest_data_collection_result()
             )
             if result["success"]:
+                self.state._analysis_result = result  # 存储真实分析结果，供下游使用
                 update_analysis_state(self.state, result)
                 logger.info(f"{analysis_type} 分析完成")
                 return {"success": True, "analysis": result, "analysis_type": analysis_type}
@@ -195,11 +200,11 @@ class SmartInvestmentFlow(Flow[AnalysisState]):
         if not analysis_result.get("success", False):
             return "conservative_decision"
         quality = (
-            analysis_result.get("analysis", {}).get("collaboration_metrics", {}).get("decision_quality", "unknown")
+            analysis_result.get("analysis", {}).get("collaboration_metrics", {}).get("consistency", "unknown")
         )
-        if quality == "excellent" and self.state.company_size == "large":
+        if quality == "high" and self.state.company_size == "large":
             return "collective_decision"
-        if quality in ["good", "excellent"]:
+        if quality in ["high", "medium"]:
             return "standard_decision"
         return "rapid_decision"
 
@@ -283,10 +288,10 @@ class SmartInvestmentFlow(Flow[AnalysisState]):
             return {"success": False, "error": str(e), "error_count": self.state.error_count}
 
     def _get_latest_data_collection_result(self) -> dict[str, Any] | None:
-        return {"sample": "data"}
+        return self.state._collection_data or None
 
     def _get_latest_analysis_result(self) -> dict[str, Any] | None:
-        return {"sample": "analysis"}
+        return self.state._analysis_result or None
 
     def run_smart_analysis(self, company: str, ticker: str) -> dict[str, Any]:
         """运行智能分析"""
@@ -298,12 +303,12 @@ class SmartInvestmentFlow(Flow[AnalysisState]):
         logger.info(f"启动智能分析: {company} ({ticker}), 深度: {self.state.analysis_depth}")
         try:
             data_result = self.data_collection_crew.execute_data_collection(company, ticker)
-            if not data_result["success"]:
+            if not data_result.get("success") and data_result.get("status") != "success":
                 return {"success": False, "error": "数据收集失败"}
-            analysis_result = self.analysis_crew.execute_collaborative_analysis(company, ticker, data_result["data"])
+            analysis_result = self.analysis_crew.execute_collaborative_analysis(company, ticker, data_result)
             if not analysis_result["success"]:
                 return {"success": False, "error": "分析失败"}
-            decision_result = self.decision_crew.execute_collective_decision(company, ticker, analysis_result["data"])
+            decision_result = self.decision_crew.execute_collective_decision(company, ticker, analysis_result)
             if not decision_result["success"]:
                 return {"success": False, "error": "决策失败"}
             summary = generate_analysis_summary(self.state)

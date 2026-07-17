@@ -5,15 +5,15 @@ market_research:
   expected_output: "市场研究报告"
 
 financial_data_collection:
-  description: "收集{company}的财务报表和关键财务指标"
+  description: "收集{company}(股票代码{ticker})的财务报表和关键财务指标，调用akshare_tool时传ticker={ticker}"
   expected_output: "财务数据报告"
 
 financial_ratio_calculation:
-  description: "对{company}进行财务比率分析，分两步：1)先算流动性+盈利能力 2)再算杠杆+估值。每次只算部分指标，不要一次算完"
+  description: "对{company}(股票代码{ticker})进行财务比率分析。调用 financial_calculator_tool 两次：1) ticker={ticker}, calculation_type=liquidity,profitability 2) ticker={ticker}, calculation_type=leverage,growth,dcf,valuation。汇总两次结果生成报告"
   expected_output: "财务比率分析报告"
 
 technical_data_collection:
-  description: "收集{company}的技术分析数据"
+  description: "收集{company}(股票代码{ticker})的技术分析数据，调用技术分析工具时传price_data={ticker}"
   expected_output: "技术数据报告"
 
 data_collection_coordination:

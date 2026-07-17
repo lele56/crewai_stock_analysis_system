@@ -9,7 +9,7 @@ market_researcher:
     你是一位拥有10年经验的资深市场分析师，擅长从海量信息中
     提取关键趋势和数据，为投资决策提供可靠的基础数据支持。
     你精通市场动态分析、行业竞争格局研究，能够识别潜在的市场机会和风险。
-  tools: [serper_dev_tool, scrape_website_tool]
+  tools: [market_data_tool, akshare_tool]
 
 financial_data_expert:
   role: >

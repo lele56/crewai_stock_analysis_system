@@ -30,8 +30,17 @@ def determine_analysis_depth(company_profile: dict[str, Any]) -> str:
 
 def assess_data_quality(data_result: dict[str, Any]) -> dict[str, Any]:
     """评估数据质量"""
-    metrics = data_result.get("collaboration_metrics", {})
-    completeness = metrics.get("collaboration_score", 0)
+    completeness = 0
+    # 数据收集成功 + 有 agents 参与 → 质量良好
+    if data_result.get("success") or data_result.get("status") == "success":
+        agents_count = data_result.get("agents_count", 0)
+        execution_time = data_result.get("execution_time", 999)
+        if agents_count >= 3 and execution_time < 300:
+            completeness = 85
+        elif agents_count >= 2:
+            completeness = 70
+        else:
+            completeness = 50
     if completeness >= 80:
         overall = "excellent"
     elif completeness >= 60:
@@ -49,8 +58,9 @@ def update_analysis_state(state: "AnalysisState", analysis_result: dict[str, Any
         scores = analysis_result.get("collaboration_scores", {})
         metrics = analysis_result.get("collaboration_metrics", {})
         state.financial_score = scores.get("overall_score", 0.0)
-        state.analysis_confidence = metrics.get("consensus_level", 0.0)
-        state.collaboration_quality = metrics.get("decision_quality", "medium")
+        consistency = metrics.get("consistency", "medium")
+        state.analysis_confidence = 0.9 if consistency == "high" else 0.6 if consistency == "medium" else 0.3
+        state.collaboration_quality = metrics.get("collaboration_level", "medium")
         logger.info("分析状态已更新")
     except Exception as e:
         logger.error(f"更新分析状态失败: {str(e)}")
@@ -64,7 +74,7 @@ def update_decision_state(state: "AnalysisState", decision_result: dict[str, Any
         metrics = decision_result.get("collective_decision_metrics", {})
         state.final_recommendation = recommendation.get("action", "hold")
         state.overall_score = recommendation.get("confidence", 0.0) * 100
-        state.decision_complexity = metrics.get("decision_quality", "standard")
+        state.decision_complexity = metrics.get("decision_type", "standard")
         logger.info("决策状态已更新")
     except Exception as e:
         logger.error(f"更新决策状态失败: {str(e)}")

@@ -73,6 +73,10 @@ class FinancialMetrics(BaseModel):
             lines.append(f"  股息率: {self.dividend_yield:.1%}")
         return "\n".join(lines)
 
+    def is_empty(self) -> bool:
+        """检查财务数据是否为空"""
+        return not any([self.revenue, self.net_profit, self.roe, self.pe])
+
 
 class MarketData(BaseModel):
     """市场数据 — 来自 market_research"""
@@ -105,6 +109,10 @@ class MarketData(BaseModel):
         if self.volatility_30d:
             lines.append(f"  30日波动率: {self.volatility_30d:.1%}")
         return "\n".join(lines)
+
+    def is_empty(self) -> bool:
+        """检查市场数据是否为空"""
+        return self.price == 0.0
 
 
 class TechnicalData(BaseModel):
@@ -143,6 +151,10 @@ class TechnicalData(BaseModel):
         if self.atr_14:
             lines.append(f"  ATR(14): {self.atr_14:.2f}")
         return "\n".join(lines)
+
+    def is_empty(self) -> bool:
+        """检查技术指标是否为空"""
+        return not any([self.rsi_14, self.ma_20, self.ma_50])
 
 
 class IndustryData(BaseModel):
@@ -183,6 +195,10 @@ class IndustryData(BaseModel):
             lines.append(f"  挑战: {self.threats}")
         return "\n".join(lines)
 
+    def is_empty(self) -> bool:
+        """检查行业数据是否为空"""
+        return len(self.sector) == 0
+
 
 class CollectionData(BaseModel):
     """数据收集阶段的完整结构化输出"""
@@ -216,6 +232,14 @@ class CollectionData(BaseModel):
     def to_industry_prompt(self) -> str:
         """生成行业分析 prompt 文本"""
         return "\n\n".join([self.market.to_prompt_text(), self.industry.to_prompt_text()])
+
+    def to_market_prompt(self) -> str:
+        """生成市场数据 prompt 文本"""
+        return self.market.to_prompt_text()
+
+    def to_technical_prompt(self) -> str:
+        """生成技术指标 prompt 文本"""
+        return self.technical.to_prompt_text()
 
 
 # ── output_pydantic 专用模型：每个任务对应一个 ──

@@ -103,22 +103,7 @@ class Config:
     DATA_SOURCE_ORDER = ["tencent", "sina", "tickflow", "akshare"]
 
     # ── Profile → Agent 映射 ─────────────────────
-    PROFILE_AGENTS_DATA = {
-        AnalysisProfile.RAPID: [
-            "market_researcher", "financial_data_expert",
-            "financial_ratio_analyst", "technical_analyst",
-        ],
-        AnalysisProfile.STANDARD: [
-            "market_researcher", "financial_data_expert",
-            "financial_ratio_analyst", "technical_analyst",
-            "data_collection_coordinator",
-        ],
-        AnalysisProfile.DEEP: [
-            "market_researcher", "financial_data_expert",
-            "financial_ratio_analyst", "technical_analyst",
-            "data_collection_coordinator",
-        ],
-    }
+    # 数据采集阶段已去 Agent 化，不再需要 PROFILE_AGENTS_DATA
     PROFILE_AGENTS_ANALYSIS = {
         AnalysisProfile.RAPID: [
             "fundamental_analyst", "risk_assessment_specialist",
@@ -149,7 +134,6 @@ class Config:
         """获取指定 profile 下某阶段的 Agent 列表"""
         p = profile or cls.ANALYSIS_PROFILE
         mapping = {
-            "data": cls.PROFILE_AGENTS_DATA,
             "analysis": cls.PROFILE_AGENTS_ANALYSIS,
             "decision": cls.PROFILE_AGENTS_DECISION,
         }

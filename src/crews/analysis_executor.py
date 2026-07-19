@@ -10,13 +10,8 @@ logger = logging.getLogger(__name__)
 # ── 数据截断配置 ────────────────────────────────
 _MAX_RAW_DATA_CHARS = 16000  # 单次传给分析 agent 的原始数据最大字符数，防止 prompt 过大导致超时
 
-# ── 数据收集任务索引 → 分析 Agent 的映射 ─────────
-# 数据收集任务顺序（见 tasks_data.yaml）：
-#   0: market_research          市场数据、行业信息
-#   1: financial_data_collection 财务报表、关键财务指标
-#   2: financial_ratio_calculation 财务比率分析
-#   3: technical_data_collection  技术分析数据
-#   4: data_collection_coordination 汇总协调
+# ── 回退路径：原始文本分析索引 ──────────────────
+# 仅在结构化数据提取失败时使用，按分析类型分配文本片段
 _ANALYSIS_DATA_MAP = {
     "fundamental": [1, 2],  # 基本面分析：财务数据 + 财务比率
     "risk": [0, 3],         # 风险评估：市场数据 + 技术分析
@@ -61,6 +56,11 @@ def _get_crew_output(data: Any) -> Any:
     return data
 
 
+def _has_prompt_keys(d: dict) -> bool:
+    """检查 dict 是否已包含分析所需的 prompt 字段"""
+    return all(k in d for k in ("financial_data", "risk_data", "industry_data"))
+
+
 def prepare_analysis_inputs(company: str, ticker: str, data_collection_result: Any) -> dict:
     """准备分析输入数据 — 优先 output_pydantic，失败回退 JSON 文本解析
 
@@ -70,6 +70,23 @@ def prepare_analysis_inputs(company: str, ticker: str, data_collection_result: A
       - industry_data:  行业分析用（市场 + 行业）
     """
     crew_output = _get_crew_output(data_collection_result)
+
+    # 快速路径：数据采集阶段已直接返回结构化 prompt 数据
+    if isinstance(crew_output, dict) and _has_prompt_keys(crew_output):
+        logger.info(
+            f"数据采集已结构化: company={company}, ticker={ticker}, "
+            f"financial={len(crew_output.get('financial_data', ''))}chars, "
+            f"risk={len(crew_output.get('risk_data', ''))}chars, "
+            f"industry={len(crew_output.get('industry_data', ''))}chars"
+        )
+        return {
+            "company": company,
+            "ticker": ticker,
+            "financial_data": crew_output.get("financial_data", ""),
+            "risk_data": crew_output.get("risk_data", ""),
+            "industry_data": crew_output.get("industry_data", ""),
+            "raw_data": crew_output.get("financial_data", ""),
+        }
 
     # 获取 tasks_output 列表（保留原始对象以访问 .pydantic 属性）
     tasks_output = _get_tasks_output_objects(crew_output)
@@ -293,3 +310,90 @@ def _std_to_consistency(std_dev: float) -> str:
         if std_dev < threshold:
             return label
     return "low"
+
+
+# ── 协作模式 ────────────────────────────────────
+
+def generate_agent_abstract(agent_output: str, agent_name: str) -> dict[str, Any]:
+    """为辩论模式生成 200 字结构化摘要，供其他 Agent 互审
+
+    Returns:
+        {"score": 77, "rating": "良好", "key_bull_points": [...],
+         "key_bear_points": [...], "key_assumptions": [...],
+         "controversial_claims": [...]}
+    """
+    score = _extract_score_from_text(agent_output)
+    rating = _score_to_rating(score)
+
+    return {
+        "score": score,
+        "rating": rating,
+        "key_points": agent_output[:300],
+        "agent_name": agent_name,
+    }
+
+
+def _score_to_rating(score: float) -> str:
+    if score >= 80:
+        return "优秀"
+    if score >= 65:
+        return "良好"
+    if score >= 45:
+        return "一般"
+    if score >= 30:
+        return "较差"
+    return "差"
+
+
+def build_iteration_prompt(
+    coordinator_output: str,
+    agent_outputs: dict[str, Any],
+) -> list[dict[str, str]]:
+    """构建迭代精炼的问题列表（STANDARD 模式）
+
+    协调员找出矛盾点，为每个分析师生成针对性问题。
+    Returns: [{"agent": "fundamental_analyst", "question": "..."}, ...]
+    """
+    questions = []
+    outputs = {k: str(v) for k, v in agent_outputs.items() if not k.startswith("_")}
+
+    if len(outputs) < 2:
+        return questions
+
+    texts = list(outputs.values())
+    for i, (name, _text) in enumerate(outputs.items()):
+        other_texts = [t for j, t in enumerate(texts) if j != i]
+        if other_texts:
+            question = (
+                f"请审阅其他分析师的观点，对以下矛盾或遗漏进行补充分析：\n\n"
+                f"其他分析师观点摘要：\n{other_texts[0][:500]}\n\n"
+                f"请针对可能的矛盾点或遗漏维度，补充你的分析（300字以内）。"
+            )
+            questions.append({"agent": name, "question": question})
+
+    return questions
+
+
+def build_debate_prompt(
+    agent_name: str,
+    own_output: str,
+    peer_abstracts: list[dict[str, Any]],
+) -> str:
+    """构建辩论模式的审阅 prompt（DEEP 模式）
+
+    每个分析师读其他两人的摘要，输出审阅意见。
+    """
+    peer_text = "\n\n".join(
+        f"### {a['agent_name']} (评分: {a['score']}, {a['rating']})\n{a['key_points']}"
+        for a in peer_abstracts
+    )
+    return (
+        f"你是一位{agent_name}。请审阅其他分析师的观点摘要，找出以下问题：\n\n"
+        f"你的原始分析：\n{own_output[:500]}\n\n"
+        f"其他分析师观点：\n{peer_text}\n\n"
+        f"请输出：\n"
+        f"1. 质疑: 指出其他分析师结论中的问题或矛盾\n"
+        f"2. 补充: 补充其他分析师遗漏的重要维度\n"
+        f"3. 修正: 你是否需要修正自己的评分？如需要，给出新评分和理由\n\n"
+        f"请控制在300字以内。"
+    )

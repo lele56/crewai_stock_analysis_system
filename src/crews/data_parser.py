@@ -150,7 +150,7 @@ def parse_collection_data(
 
     优先级：output_pydantic > JSON 文本解析 > 原始文本
 
-    任务顺序（tasks_data.yaml）：
+    任务索引（按数据收集阶段输出顺序）：
       0: market_research         → MarketResearchOutput → MarketData + IndustryData
       1: financial_data_collection → FinancialDataOutput → FinancialMetrics
       2: financial_ratio_calculation → FinancialRatioOutput → FinancialMetrics（合并）

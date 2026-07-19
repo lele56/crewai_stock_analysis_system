@@ -178,6 +178,15 @@ class TechnicalAnalysisTool(BaseTool):
         """计算成交量指标"""
         return calculate_all_volume_indicators(df)
 
+    def _calculate_all_indicators(self, df: pd.DataFrame) -> dict[str, Any]:
+        """计算所有技术指标，用于直接数据采集（非 Agent 调用）"""
+        result = {}
+        result.update(self._calculate_trend_indicators(df))
+        result.update(self._calculate_momentum_indicators(df))
+        result.update(self._calculate_volatility_indicators(df))
+        result.update(self._calculate_volume_indicators(df))
+        return result
+
     def _generate_technical_report(self, df: pd.DataFrame, results: dict, analysis_type: str) -> str:
         """生成技术分析报告（精简版，适配所有模型）"""
         lines = [

@@ -6,13 +6,11 @@
 from crewai import Agent
 
 from src.config import AnalysisProfile, Config
-from src.tools.market_data_tool import MarketDataTool
 from src.tools.reporting_tools import ReportWritingTool
-from src.tools.technical_tools import TechnicalAnalysisTool
 from src.utils.cost_tracker import CostTracker
 from src.utils.llm_factory import get_llm
 
-_TOOL_CLASSES = [ReportWritingTool, MarketDataTool, TechnicalAnalysisTool]
+_TOOL_CLASSES = [ReportWritingTool]
 _TOOL_INSTANCES: dict[type, object] = {}
 
 

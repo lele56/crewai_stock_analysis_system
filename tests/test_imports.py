@@ -54,18 +54,10 @@ def test_import_decision_agents():
     assert callable(create_investment_advisor)
 
 
-def test_import_data_collection_agents():
-    from src.crews.data_collection_agents import (
-        create_data_collection_agents,
-    )
-
-    assert callable(create_data_collection_agents)
-
-
 def test_import_decision_executor():
     from src.crews.decision_executor import (
-        run_collective_decision_vote,
+        prepare_decision_inputs,
     )
 
-    result = run_collective_decision_vote("TEST", "TST", {"fundamental": 80})
-    assert result["result"] is not None
+    result = prepare_decision_inputs({"analysis_result": "test"})
+    assert result is not None

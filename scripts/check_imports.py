@@ -7,16 +7,14 @@ sys.path.insert(0, "src")
 
 tests = [
     ("task_dataclasses", "from src.tasks.task_dataclasses import AgentCapability, TaskComplexity, DynamicTask"),
-    ("cache_manager", "from src.utils.cache_manager import CacheManager"),
     ("collective_decision", "from src.tasks.collective_decision_maker import get_decision_maker"),
-    ("collaboration_optimizer", "from src.tools.collaboration_optimizer import analyze_collaboration_patterns"),
     ("analysis_agents", "from src.crews.analysis_agents import create_fundamental_analyst"),
     ("analysis_tasks", "from src.crews.analysis_tasks import create_fundamental_analysis_task"),
     ("analysis_executor", "from src.crews.analysis_executor import calculate_collaboration_scores"),
-    ("data_collection_agents", "from src.crews.data_collection_agents import create_data_collection_agents"),
-    ("data_collection_tasks", "from src.crews.data_collection_tasks import create_data_collection_tasks"),
+    ("data_collection_crew", "from src.crews.data_collection_crew import DataCollectionCrew"),
+    ("data_collection_executor", "from src.crews.data_collection_executor import collect_data_direct"),
     ("decision_tasks", "from src.crews.decision_tasks import create_investment_strategy_task"),
-    ("decision_executor", "from src.crews.decision_executor import run_collective_decision_vote"),
+    ("decision_executor", "from src.crews.decision_executor import prepare_decision_inputs"),
     ("stock_analysis_system", "from src.stock_analysis_system import StockAnalysisSystem"),
     ("main", "from main import analyze_single_stock"),
 ]

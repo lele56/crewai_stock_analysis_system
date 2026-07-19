@@ -81,95 +81,55 @@ class SmartInvestmentFlow(Flow[AnalysisState]):
         logger.info(f"开始分析 {company} ({ticker}), 深度: {self.state.analysis_depth}")
         return {"company": company, "ticker": ticker, "profile": company_profile}
 
+    # ── 数据收集阶段 ──────────────────────────────
+
     @listen("initialize_analysis")
-    @router
-    def route_data_collection(self, init_result: dict[str, Any]) -> str:
-        """智能数据收集路由"""
-        logger.info("=== 智能数据收集路由 ===")
-        if self.state.company_size == "large" and self.state.analysis_depth == "deep":
-            logger.info("选择全面数据收集策略")
-            return "comprehensive_data_collection"
-        if self.state.market_volatility == "high":
-            logger.info("选择实时数据收集策略")
-            return "real_time_data_collection"
-        logger.info("选择标准数据收集策略")
-        return "standard_data_collection"
-
-    @listen("route_data_collection")
-    def standard_data_collection(self, route_result: dict[str, Any]) -> dict[str, Any]:
-        """标准数据收集"""
-        return self._execute_data_collection("standard")
-
-    @listen("route_data_collection")
-    def comprehensive_data_collection(self, route_result: dict[str, Any]) -> dict[str, Any]:
-        """全面数据收集"""
-        return self._execute_data_collection("comprehensive")
-
-    @listen("route_data_collection")
-    def real_time_data_collection(self, route_result: dict[str, Any]) -> dict[str, Any]:
-        """实时数据收集"""
-        return self._execute_data_collection("real_time")
-
-    def _execute_data_collection(self, collection_type: str) -> dict[str, Any]:
+    def execute_data_collection(self, init_result: dict[str, Any]) -> dict[str, Any]:
         """执行数据收集"""
-        logger.info(f"=== {collection_type} 数据收集 ===")
+        logger.info("=== 数据收集 ===")
         self.state.current_stage = "data_collection"
         try:
             result = self.data_collection_crew.execute_data_collection(self.state.company, self.state.ticker)
-            if result.get("success") or result.get("status") == "success":
-                self.state._collection_data = result  # 存储真实数据，供下游使用
-                quality = assess_data_quality(result)
-                self.state.data_quality = quality["overall_quality"]
-                self.state.data_completeness = quality["completeness"]
-                logger.info(f"数据收集成功 - 质量: {self.state.data_quality}")
-                return {"success": True, "data": result, "collection_type": collection_type, "data_quality": quality}
-            self.state.error_count += 1
-            self.state.retry_attempts["data_collection"] = self.state.retry_attempts.get("data_collection", 0) + 1
-            logger.error(f"数据收集失败: {result.get('error', '未知错误')}")
-            if self.state.retry_attempts["data_collection"] < 2:
-                logger.info("尝试备选数据收集方法...")
-                self.state.alternative_paths.append("alternative_data_collection")
-                return {"success": False, "error": result.get("error"), "retry": True}
-            return {"success": False, "error": result.get("error")}
+            if not (result.get("success") or result.get("status") == "success"):
+                return self._handle_stage_failure("data_collection", result)
+            self.state._collection_data = result
+            quality = assess_data_quality(result)
+            self.state.data_quality = quality["overall_quality"]
+            self.state.data_completeness = quality["completeness"]
+            logger.info(f"数据收集成功 - 质量: {self.state.data_quality}")
+            return {"success": True, "data": result, "data_quality": quality}
         except Exception as e:
-            self.state.error_count += 1
-            logger.error(f"数据收集异常: {str(e)}")
-            return {"success": False, "error": str(e)}
+            return self._handle_stage_exception("data_collection", e)
 
-    @listen(or_("standard_data_collection", "comprehensive_data_collection", "real_time_data_collection"))
+    @listen("execute_data_collection")
     @router
     def route_analysis_strategy(self, data_result: dict[str, Any]) -> str:
         """智能分析策略路由"""
-        logger.info("=== 智能分析策略路由 ===")
         if not data_result.get("success", False):
-            logger.info("数据收集失败，使用简化分析")
-            return "simplified_analysis"
+            return "rapid_analysis"
         quality = data_result.get("data_quality", {}).get("overall_quality", "unknown")
         if quality == "excellent" and self.state.analysis_depth == "deep":
             return "deep_analysis"
-        if quality in ["good", "excellent"]:
+        if quality in ("good", "excellent"):
             return "standard_analysis"
         return "rapid_analysis"
 
+    # ── 分析阶段 ──────────────────────────────────
+
     @listen("route_analysis_strategy")
     def deep_analysis(self, route_result: dict[str, Any]) -> dict[str, Any]:
-        """深度分析"""
+        """深度分析策略：全量 agents + 协作"""
         return self._execute_analysis("deep")
 
     @listen("route_analysis_strategy")
     def standard_analysis(self, route_result: dict[str, Any]) -> dict[str, Any]:
-        """标准分析"""
+        """标准分析策略"""
         return self._execute_analysis("standard")
 
     @listen("route_analysis_strategy")
     def rapid_analysis(self, route_result: dict[str, Any]) -> dict[str, Any]:
-        """快速分析"""
+        """快速分析策略：最少 agents"""
         return self._execute_analysis("rapid")
-
-    @listen("route_analysis_strategy")
-    def simplified_analysis(self, route_result: dict[str, Any]) -> dict[str, Any]:
-        """简化分析"""
-        return self._execute_analysis("simplified")
 
     def _execute_analysis(self, analysis_type: str) -> dict[str, Any]:
         """执行分析"""
@@ -179,53 +139,52 @@ class SmartInvestmentFlow(Flow[AnalysisState]):
             result = self.analysis_crew.execute_collaborative_analysis(
                 self.state.company, self.state.ticker, self._get_latest_data_collection_result()
             )
-            if result["success"]:
-                self.state._analysis_result = result  # 存储真实分析结果，供下游使用
-                update_analysis_state(self.state, result)
-                logger.info(f"{analysis_type} 分析完成")
-                return {"success": True, "analysis": result, "analysis_type": analysis_type}
-            self.state.error_count += 1
-            logger.error(f"{analysis_type} 分析失败: {result.get('error', '未知错误')}")
-            return {"success": False, "error": result.get("error")}
+            if not result["success"]:
+                return self._handle_stage_failure("analysis", result)
+            self.state._analysis_result = result
+            update_analysis_state(self.state, result)
+            logger.info(f"{analysis_type} 分析完成")
+            return {"success": True, "analysis": result, "analysis_type": analysis_type}
         except Exception as e:
-            self.state.error_count += 1
-            logger.error(f"{analysis_type} 分析异常: {str(e)}")
-            return {"success": False, "error": str(e)}
+            return self._handle_stage_exception("analysis", e)
 
-    @listen(or_("deep_analysis", "standard_analysis", "rapid_analysis", "simplified_analysis"))
+    @listen(or_("deep_analysis", "standard_analysis", "rapid_analysis"))
     @router
     def route_decision_strategy(self, analysis_result: dict[str, Any]) -> str:
         """智能决策策略路由"""
-        logger.info("=== 智能决策策略路由 ===")
         if not analysis_result.get("success", False):
             return "conservative_decision"
-        quality = (
-            analysis_result.get("analysis", {}).get("collaboration_metrics", {}).get("consistency", "unknown")
+        consistency = (
+            analysis_result.get("analysis", {})
+            .get("collaboration_metrics", {})
+            .get("consistency", "unknown")
         )
-        if quality == "high" and self.state.company_size == "large":
+        if consistency == "high" and self.state.company_size == "large":
             return "collective_decision"
-        if quality in ["high", "medium"]:
+        if consistency in ("high", "medium"):
             return "standard_decision"
         return "rapid_decision"
 
+    # ── 决策阶段 ──────────────────────────────────
+
     @listen("route_decision_strategy")
     def collective_decision(self, route_result: dict[str, Any]) -> dict[str, Any]:
-        """集体决策"""
+        """集体决策策略：多 agents 投票"""
         return self._execute_decision("collective")
 
     @listen("route_decision_strategy")
     def standard_decision(self, route_result: dict[str, Any]) -> dict[str, Any]:
-        """标准决策"""
+        """标准决策策略"""
         return self._execute_decision("standard")
 
     @listen("route_decision_strategy")
     def rapid_decision(self, route_result: dict[str, Any]) -> dict[str, Any]:
-        """快速决策"""
+        """快速决策策略：单 agent 直接出结果"""
         return self._execute_decision("rapid")
 
     @listen("route_decision_strategy")
     def conservative_decision(self, route_result: dict[str, Any]) -> dict[str, Any]:
-        """保守决策"""
+        """保守决策策略：数据不足时降级使用"""
         return self._execute_decision("conservative")
 
     def _execute_decision(self, decision_type: str) -> dict[str, Any]:
@@ -236,17 +195,15 @@ class SmartInvestmentFlow(Flow[AnalysisState]):
             result = self.decision_crew.execute_collective_decision(
                 self.state.company, self.state.ticker, self._get_latest_analysis_result()
             )
-            if result["success"]:
-                update_decision_state(self.state, result)
-                logger.info(f"{decision_type} 决策完成")
-                return {"success": True, "decision": result, "decision_type": decision_type}
-            self.state.error_count += 1
-            logger.error(f"{decision_type} 决策失败: {result.get('error', '未知错误')}")
-            return {"success": False, "error": result.get("error")}
+            if not result["success"]:
+                return self._handle_stage_failure("decision", result)
+            update_decision_state(self.state, result)
+            logger.info(f"{decision_type} 决策完成")
+            return {"success": True, "decision": result, "decision_type": decision_type}
         except Exception as e:
-            self.state.error_count += 1
-            logger.error(f"{decision_type} 决策异常: {str(e)}")
-            return {"success": False, "error": str(e)}
+            return self._handle_stage_exception("decision", e)
+
+    # ── 完成阶段 ──────────────────────────────────
 
     @listen(or_("collective_decision", "standard_decision", "rapid_decision", "conservative_decision"))
     def finalize_analysis(self, decision_result: dict[str, Any]) -> dict[str, Any]:
@@ -254,31 +211,30 @@ class SmartInvestmentFlow(Flow[AnalysisState]):
         logger.info("=== 完成智能分析流程 ===")
         self.state.current_stage = "finalization"
         self.state.end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        try:
-            if decision_result.get("success", False):
-                summary = generate_analysis_summary(self.state)
-                logger.info("智能分析流程成功完成")
-                return {
-                    "success": True,
-                    "company": self.state.company,
-                    "ticker": self.state.ticker,
-                    "summary": summary,
-                    "final_recommendation": self.state.final_recommendation,
-                    "overall_score": self.state.overall_score,
-                    "analysis_depth": self.state.analysis_depth,
-                    "collaboration_quality": self.state.collaboration_quality,
-                    "path_taken": self.state.alternative_paths,
-                    "retry_attempts": self.state.retry_attempts,
-                    "analysis_time": self.state.start_time,
-                    "completion_time": self.state.end_time,
-                    "data_quality": self.state.data_quality,
-                    "error_count": self.state.error_count,
-                    "warnings": self.state.warnings,
-                }
-            logger.error("智能分析流程失败")
+        if not decision_result.get("success", False):
             return {
                 "success": False,
                 "error": decision_result.get("error", "未知错误"),
+                "error_count": self.state.error_count,
+                "warnings": self.state.warnings,
+            }
+        try:
+            summary = generate_analysis_summary(self.state)
+            logger.info("智能分析流程成功完成")
+            return {
+                "success": True,
+                "company": self.state.company,
+                "ticker": self.state.ticker,
+                "summary": summary,
+                "final_recommendation": self.state.final_recommendation,
+                "overall_score": self.state.overall_score,
+                "analysis_depth": self.state.analysis_depth,
+                "collaboration_quality": self.state.collaboration_quality,
+                "path_taken": self.state.alternative_paths,
+                "retry_attempts": self.state.retry_attempts,
+                "analysis_time": self.state.start_time,
+                "completion_time": self.state.end_time,
+                "data_quality": self.state.data_quality,
                 "error_count": self.state.error_count,
                 "warnings": self.state.warnings,
             }
@@ -287,14 +243,35 @@ class SmartInvestmentFlow(Flow[AnalysisState]):
             logger.error(f"完成分析异常: {str(e)}")
             return {"success": False, "error": str(e), "error_count": self.state.error_count}
 
+    # ── 辅助方法 ──────────────────────────────────
+
     def _get_latest_data_collection_result(self) -> dict[str, Any] | None:
         return self.state._collection_data or None
 
     def _get_latest_analysis_result(self) -> dict[str, Any] | None:
         return self.state._analysis_result or None
 
+    def _handle_stage_failure(self, stage: str, result: dict[str, Any]) -> dict[str, Any]:
+        """统一处理阶段失败"""
+        self.state.error_count += 1
+        self.state.retry_attempts[stage] = self.state.retry_attempts.get(stage, 0) + 1
+        logger.error(f"{stage} 失败: {result.get('error', '未知错误')}")
+        if self.state.retry_attempts[stage] < 2:
+            logger.info(f"尝试备选{stage}方法...")
+            self.state.alternative_paths.append(f"alternative_{stage}")
+            return {"success": False, "error": result.get("error"), "retry": True}
+        return {"success": False, "error": result.get("error")}
+
+    def _handle_stage_exception(self, stage: str, e: Exception) -> dict[str, Any]:
+        """统一处理阶段异常"""
+        self.state.error_count += 1
+        logger.error(f"{stage} 异常: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+    # ── 简化入口（直接调用，不走 Flow 路由）───────
+
     def run_smart_analysis(self, company: str, ticker: str) -> dict[str, Any]:
-        """运行智能分析"""
+        """运行智能分析（简化入口）"""
         self.state.company = company
         self.state.ticker = ticker
         self.state.start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -303,14 +280,16 @@ class SmartInvestmentFlow(Flow[AnalysisState]):
         logger.info(f"启动智能分析: {company} ({ticker}), 深度: {self.state.analysis_depth}")
         try:
             data_result = self.data_collection_crew.execute_data_collection(company, ticker)
-            if not data_result.get("success") and data_result.get("status") != "success":
+            if not (data_result.get("success") or data_result.get("status") == "success"):
                 return {"success": False, "error": "数据收集失败"}
             analysis_result = self.analysis_crew.execute_collaborative_analysis(company, ticker, data_result)
             if not analysis_result["success"]:
                 return {"success": False, "error": "分析失败"}
+            update_analysis_state(self.state, analysis_result)
             decision_result = self.decision_crew.execute_collective_decision(company, ticker, analysis_result)
             if not decision_result["success"]:
                 return {"success": False, "error": "决策失败"}
+            update_decision_state(self.state, decision_result)
             summary = generate_analysis_summary(self.state)
             return {
                 "success": True,
@@ -327,7 +306,3 @@ class SmartInvestmentFlow(Flow[AnalysisState]):
             }
         except Exception as e:
             return {"success": False, "error": str(e), "error_count": self.state.error_count}
-
-
-if __name__ == "__main__":
-    flow = SmartInvestmentFlow()

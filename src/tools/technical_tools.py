@@ -4,11 +4,9 @@ TechnicalAnalysisTool 主类，负责数据解析、指标计算编排和报告�
 具体指标计算函数见 technical_indicators.py，图表生成见 technical_charting.py。
 """
 
-from datetime import datetime
 import logging
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -22,8 +20,17 @@ from src.tools.technical_indicators import (
 
 logger = logging.getLogger(__name__)
 
-plt.rcParams["font.sans-serif"] = ["SimHei", "Arial Unicode MS"]
-plt.rcParams["axes.unicode_minus"] = False
+# 工具级缓存：避免同一参数重复计算
+_cache: dict[str, str] = {}
+
+
+def _configure_matplotlib() -> None:
+    """延迟配置 matplotlib 后端和字体（首次使用时初始化）"""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    plt.rcParams["font.sans-serif"] = ["SimHei", "Arial Unicode MS"]
+    plt.rcParams["axes.unicode_minus"] = False
 
 
 class TechnicalAnalysisTool(BaseTool):
@@ -37,6 +44,11 @@ class TechnicalAnalysisTool(BaseTool):
 
     def _run(self, price_data: str, analysis_type: str = "comprehensive") -> str:
         """执行技术分析"""
+        cache_key = f"{price_data[:50]}|{analysis_type}"
+        if cache_key in _cache:
+            logger.debug(f"技术分析命中缓存: {price_data[:30]}...")
+            return _cache[cache_key]
+
         try:
             logger.debug(f"[技术分析] 开始分析，分析类型: {analysis_type}")
             df = self._parse_price_data(price_data)
@@ -55,6 +67,7 @@ class TechnicalAnalysisTool(BaseTool):
                 results["volume_indicators"] = self._calculate_volume_indicators(df)
 
             report = self._generate_technical_report(df, results, analysis_type)
+            _cache[cache_key] = report
             logger.info("技术分析完成")
             return report
 
@@ -67,7 +80,7 @@ class TechnicalAnalysisTool(BaseTool):
         """解析价格数据，支持多种JSON格式和股票代码"""
         import json
 
-        logger.info(f"技术分析输入: {price_data[:200]}...")
+        logger.debug(f"技术分析输入: {price_data[:200]}...")
 
         try:
             data = json.loads(price_data)
@@ -116,10 +129,10 @@ class TechnicalAnalysisTool(BaseTool):
                     return None
 
             # 优先读缓存
-            from src.tools.akshare_data_parser import load_kline_from_cache
+            from src.tools.akshare_data_cache import load_kline_from_cache
             df = load_kline_from_cache(code)
             if df is not None and not df.empty:
-                logger.info(f"从缓存加载K线数据: {code} ({len(df)} 条)")
+                logger.debug(f"从缓存加载K线数据: {code} ({len(df)} 条)")
                 return df
 
             logger.info(f"缓存未命中，API 获取: {code}")

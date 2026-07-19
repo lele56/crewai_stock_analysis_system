@@ -105,9 +105,9 @@ class DecisionCrew:
           report_generator        → 依赖策略（整合生成报告+质量审核）
         """
         self._task_list = self.tasks
-        for task, agent in zip(self._task_list, self.agents, strict=False):
-            task.agent = agent
-            task.async_execution = False
+        for t, a in zip(self._task_list, self.agents, strict=False):
+            t.agent = a
+            t.async_execution = False
 
         n = len(self._task_list)
         if n <= 1:

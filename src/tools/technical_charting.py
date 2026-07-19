@@ -6,17 +6,35 @@
 from datetime import datetime
 import logging
 import os
+from typing import Any
 
-import matplotlib
-
-matplotlib.use("Agg")  # 非交互后端，避免多线程 GUI 警告
-import matplotlib.pyplot as plt
 import pandas as pd
 
 from src.tools.reporting_tools import BaseTool
 from src.tools.technical_indicators import calculate_macd, calculate_rsi
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_matplotlib() -> Any:
+    """延迟配置 matplotlib 后端和字体（首次图表生成时初始化），返回 pyplot 模块"""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    plt.rcParams["font.sans-serif"] = ["SimHei", "Arial Unicode MS"]
+    plt.rcParams["axes.unicode_minus"] = False
+    return plt
+
+# 模块级单例缓存
+_plt: Any = None
+
+
+def _get_plt() -> Any:
+    """获取 matplotlib.pyplot 模块（延迟初始化）"""
+    global _plt
+    if _plt is None:
+        _plt = _configure_matplotlib()
+    return _plt
 
 
 class ChartingTool(BaseTool):
@@ -111,7 +129,7 @@ class ChartingTool(BaseTool):
                     return None
 
             # 优先读缓存
-            from src.tools.akshare_data_parser import load_kline_from_cache
+            from src.tools.akshare_data_cache import load_kline_from_cache
             df = load_kline_from_cache(code)
             if df is not None and not df.empty:
                 logger.info(f"图表工具从缓存加载: {code} ({len(df)} 条)")
@@ -132,21 +150,30 @@ class ChartingTool(BaseTool):
 
     def _generate_candlestick_chart(self, df: pd.DataFrame) -> str:
         """生成K线图"""
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={"height_ratios": [3, 1]})
-
+        plt = _get_plt()
+        import matplotlib.dates as mdates
         from mplfinance.original_flavor import candlestick_ohlc
 
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={"height_ratios": [3, 1]})
+
+        # 将日期转换为 matplotlib 日期数字格式，candlestick_ohlc 要求 float date
         ohlc = df[["Open", "High", "Low", "Close"]].copy()
-        ohlc["Date"] = range(len(ohlc))
-        candlestick_ohlc(ax1, ohlc.values, width=0.6, colorup="g", colordown="r")
+        ohlc["Date"] = mdates.date2num(df.index.to_pydatetime())
+        quotes = [tuple(row) for row in ohlc[["Date", "Open", "High", "Low", "Close"]].values]
+
+        candlestick_ohlc(ax1, quotes, width=0.6, colorup="g", colordown="r")
         ax1.set_title("K线图")
         ax1.set_ylabel("价格")
         ax1.grid(True)
+        ax1.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
+        plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
         ax2.bar(df.index, df["Volume"], color="blue", alpha=0.6)
         ax2.set_title("成交量")
         ax2.set_ylabel("成交量")
         ax2.grid(True)
+        ax2.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
+        plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
         plt.tight_layout()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -157,6 +184,7 @@ class ChartingTool(BaseTool):
 
     def _generate_line_chart(self, df: pd.DataFrame) -> str:
         """生成价格走势图"""
+        plt = _get_plt()
         fig, ax = plt.subplots(figsize=(12, 6))
 
         ax.plot(df.index, df["Close"], label="收盘价", color="blue", linewidth=2)
@@ -178,6 +206,7 @@ class ChartingTool(BaseTool):
 
     def _generate_volume_chart(self, df: pd.DataFrame) -> str:
         """生成成交量图"""
+        plt = _get_plt()
         fig, ax = plt.subplots(figsize=(12, 6))
 
         colors = ["green" if close >= open else "red" for close, open in zip(df["Close"], df["Open"], strict=False)]
@@ -199,6 +228,7 @@ class ChartingTool(BaseTool):
 
     def _generate_indicators_chart(self, df: pd.DataFrame) -> str:
         """生成技术指标图"""
+        plt = _get_plt()
         fig, axes = plt.subplots(4, 1, figsize=(12, 12))
 
         axes[0].plot(df.index, df["Close"], label="收盘价", color="black", linewidth=1)

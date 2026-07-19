@@ -15,6 +15,10 @@ from src.tools.reporting_tools import BaseTool
 logger = logging.getLogger(__name__)
 
 
+# ── 模块级报告缓存，避免同一 ticker 被多次生成报告 ─
+_report_cache: dict[str, str] = {}
+
+
 class AkShareTool(BaseTool):
     """多数据源股票数据工具"""
 
@@ -22,6 +26,11 @@ class AkShareTool(BaseTool):
     description: str = "获取股票的财务数据、价格数据和市场信息（多数据源）"
 
     def _run(self, ticker: str, period: str = "1y") -> str:
+        cache_key = f"{ticker}:{period}"
+        if cache_key in _report_cache:
+            logger.info(f"使用缓存报告: {ticker}")
+            return _report_cache[cache_key]
+
         try:
             time.sleep(1)
             logger.info(f"获取 {ticker} 的数据，周期: {period}")
@@ -36,6 +45,7 @@ class AkShareTool(BaseTool):
             time.sleep(0.3)
             cashflow = get_financial_statements(ticker, "现金流量表")
             report = generate_stock_report(ticker, info, hist, financials, balance_sheet, cashflow)
+            _report_cache[cache_key] = report
             logger.info(f"成功获取 {ticker} 的数据")
             return report
         except Exception as e:

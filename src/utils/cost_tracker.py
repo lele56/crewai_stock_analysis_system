@@ -11,6 +11,7 @@ tracker.summary()  # → {"total_calls": 24, "estimated_cost_usd": 0.0123}
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import threading
 import time
 from typing import Any
@@ -54,6 +55,7 @@ class CostTracker:
     _lock = threading.Lock()
 
     def __new__(cls) -> CostTracker:
+        """单例模式：确保全局只有一个追踪器实例"""
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -62,19 +64,21 @@ class CostTracker:
         return cls._instance
 
     def _reset(self) -> None:
+        """初始化/重置追踪器内部状态"""
         self.per_agent: dict[str, dict[str, int]] = {}
         self.start_time = 0.0
         self._active = False
-        self._llm_ref: Any = None          # 指向 LLM 实例，用于获取实际使用的模型
-        self._fallback_used: list[str] = []  # 记录故障转移历史
+        self._llm_ref: Any = None
+        self._fallback_used: list[str] = []
 
     def reset(self, llm: Any = None) -> None:
+        """启动追踪器：记录开始时间，绑定 LLM 实例"""
         self._reset()
         self.start_time = time.perf_counter()
         self._active = True
         self._llm_ref = llm
 
-    def step_callback(self, agent_name: str):
+    def step_callback(self, agent_name: str) -> Callable[..., Any]:
         """返回一个 step_callback 闭包，直接传给 Agent(step_callback=...)"""
 
         def callback(step_output: Any) -> None:

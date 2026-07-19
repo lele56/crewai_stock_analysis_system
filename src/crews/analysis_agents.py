@@ -6,14 +6,13 @@
 from crewai import Agent
 
 from src.config import AnalysisProfile, Config
-from src.tools.financial_tools import FinancialCalculatorTool
 from src.tools.market_data_tool import MarketDataTool
 from src.tools.reporting_tools import ReportWritingTool
 from src.tools.technical_tools import TechnicalAnalysisTool
 from src.utils.cost_tracker import CostTracker
 from src.utils.llm_factory import get_llm
 
-_TOOL_CLASSES = [ReportWritingTool, FinancialCalculatorTool, MarketDataTool, TechnicalAnalysisTool]
+_TOOL_CLASSES = [ReportWritingTool, MarketDataTool, TechnicalAnalysisTool]
 _TOOL_INSTANCES: dict[type, object] = {}
 
 
@@ -77,7 +76,9 @@ def create_risk_assessment_specialist(agents_config: dict | None = None) -> Agen
         配置好的风险评估专家 Agent
     """
     if agents_config and "risk_assessment_specialist" in agents_config:
-        return Agent(config=agents_config["risk_assessment_specialist"], **_agent_defaults(agent_name="risk_assessment_specialist"))
+        return Agent(
+        config=agents_config["risk_assessment_specialist"],
+        **_agent_defaults(agent_name="risk_assessment_specialist"))
     return Agent(
         role="风险评估专家",
         goal="全面评估投资风险，识别潜在的下行风险和风险点",
@@ -121,7 +122,9 @@ def create_analysis_coordinator(agents_config: dict | None = None) -> Agent:
         配置好的分析协调员 Agent（无工具，仅协调）
     """
     if agents_config and "analysis_coordinator" in agents_config:
-        return Agent(config=agents_config["analysis_coordinator"], **_agent_defaults(no_tools=True, agent_name="analysis_coordinator"))
+        return Agent(
+        config=agents_config["analysis_coordinator"],
+        **_agent_defaults(no_tools=True, agent_name="analysis_coordinator"))
     return Agent(
         role="分析协调员",
         goal="协调整体分析流程，整合各方意见，形成综合分析结论",

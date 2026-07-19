@@ -2,25 +2,182 @@
 """分析团队执行器 - 结果处理、评分计算、协作分析"""
 
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# ── 数据截断配置 ────────────────────────────────
+_MAX_RAW_DATA_CHARS = 16000  # 单次传给分析 agent 的原始数据最大字符数，防止 prompt 过大导致超时
+
+# ── 数据收集任务索引 → 分析 Agent 的映射 ─────────
+# 数据收集任务顺序（见 tasks_data.yaml）：
+#   0: market_research          市场数据、行业信息
+#   1: financial_data_collection 财务报表、关键财务指标
+#   2: financial_ratio_calculation 财务比率分析
+#   3: technical_data_collection  技术分析数据
+#   4: data_collection_coordination 汇总协调
+_ANALYSIS_DATA_MAP = {
+    "fundamental": [1, 2],  # 基本面分析：财务数据 + 财务比率
+    "risk": [0, 3],         # 风险评估：市场数据 + 技术分析
+    "industry": [0],        # 行业分析：市场数据
+    "all": [0, 1, 2, 3, 4],  # 兜底：全部数据
+}
+
+# ── 评分阈值 → 操作建议 ──────────────────────────
+_ACTION_THRESHOLDS = (
+    (80, "强烈买入", 0.95),
+    (65, "买入", 0.85),
+    (45, "持有", 0.60),
+    (30, "卖出", 0.70),
+)
+
+# ── 标准差 → 一致性映射（越小越好）───────────────
+_STD_CONSISTENCY_THRESHOLDS = (
+    (10, "high"),
+    (20, "medium"),
+)
+
+# ── 评分提取正则（预编译）─────────────────────────
+_SCORE_PATTERNS = [
+    re.compile(r"评分[：:]\s*(\d+(?:\.\d+)?)"),
+    re.compile(r"score[：:\s]*(\d+(?:\.\d+)?)", re.IGNORECASE),
+    re.compile(r"(\d+(?:\.\d+)?)\s*分"),
+    re.compile(r"(\d+(?:\.\d+)?)\s*/\s*100"),
+]
+
+_FINAL_SCORE_PATTERNS = [
+    re.compile(r"最终.*?评分[：:]\s*(\d+(?:\.\d+)?)"),
+    re.compile(r"综合评分[：:]\s*(\d+(?:\.\d+)?)"),
+    re.compile(r"最终.*?(\d+(?:\.\d+)?)\s*/\s*100"),
+    re.compile(r"综合评分[：:]*\s*\*{0,2}(\d+(?:\.\d+)?)\s*/\s*100"),
+]
+
+
+def _get_crew_output(data: Any) -> Any:
+    """从 dict 或 CrewOutput 中提取核心输出对象"""
+    if isinstance(data, dict):
+        return data.get("result")
+    return data
+
 
 def prepare_analysis_inputs(company: str, ticker: str, data_collection_result: Any) -> dict:
-    """准备分析输入数据"""
-    if hasattr(data_collection_result, "raw"):
-        raw_text = str(data_collection_result.raw)
-    elif isinstance(data_collection_result, str):
-        raw_text = data_collection_result
-    else:
-        raw_text = str(data_collection_result)
+    """准备分析输入数据 — 优先 output_pydantic，失败回退 JSON 文本解析
 
+    返回三个独立字段，每个分析 Agent 只取自己需要的：
+      - financial_data: 基本面分析用（财务 + 比率）
+      - risk_data:      风险评估用（市场 + 技术）
+      - industry_data:  行业分析用（市场 + 行业）
+    """
+    crew_output = _get_crew_output(data_collection_result)
+
+    # 获取 tasks_output 列表（保留原始对象以访问 .pydantic 属性）
+    tasks_output = _get_tasks_output_objects(crew_output)
+
+    # 尝试结构化解析（优先 output_pydantic）
+    from src.crews.data_parser import collection_data_to_prompt, parse_collection_data
+
+    structured = parse_collection_data(tasks_output, company=company, ticker=ticker)
+    prompt_data = collection_data_to_prompt(structured)
+
+    # 检查结构化数据是否有效
+    effective = any(len(v) > 30 for v in prompt_data.values())
+
+    if effective:
+        logger.info(
+            f"结构化数据提取成功: company={company}, ticker={ticker}, "
+            f"financial={len(prompt_data['financial_data'])}chars, "
+            f"risk={len(prompt_data['risk_data'])}chars, "
+            f"industry={len(prompt_data['industry_data'])}chars"
+        )
+        return {
+            "company": company,
+            "ticker": ticker,
+            **prompt_data,
+            "raw_data": prompt_data["financial_data"],
+        }
+
+    # 回退：原始文本拼接
+    logger.warning("结构化数据提取失败，回退到原始文本模式")
+    task_texts = _extract_task_texts(crew_output)
+    return _prepare_raw_inputs(company, ticker, task_texts)
+
+
+def _get_tasks_output_objects(crew_output: Any) -> list[Any]:
+    """获取 tasks_output 原始对象列表（保留 .pydantic 属性）"""
+    if crew_output is None:
+        return []
+    if hasattr(crew_output, "tasks_output"):
+        return list(crew_output.tasks_output)
+    return []
+
+
+def _extract_task_texts(crew_output: Any) -> list[str]:
+    """从 CrewOutput 中提取各任务原始文本列表"""
+    if crew_output is None:
+        return []
+
+    if hasattr(crew_output, "tasks_output"):
+        return [str(t.raw) for t in crew_output.tasks_output if hasattr(t, "raw")]
+    if hasattr(crew_output, "raw"):
+        return [str(crew_output.raw)]
+    if isinstance(crew_output, str):
+        return [crew_output]
+    return [str(crew_output)]
+
+
+def _prepare_raw_inputs(company: str, ticker: str, task_texts: list[str]) -> dict:
+    """回退方案：原始文本拼接 + 清洗 + 截断"""
+    def _build(analysis_type: str) -> str:
+        indices = _ANALYSIS_DATA_MAP.get(analysis_type, [0, 1, 2, 3, 4])
+        parts = [_clean_text(task_texts[i]) for i in indices if i < len(task_texts) and task_texts[i]]
+        return _trim_text("\n\n".join(parts), _MAX_RAW_DATA_CHARS)
+
+    financial_data = _build("fundamental")
+    risk_data = _build("risk")
+    industry_data = _build("industry")
+
+    logger.info(
+        f"原始文本模式: company={company}, ticker={ticker}, "
+        f"financial={len(financial_data)}chars, risk={len(risk_data)}chars, "
+        f"industry={len(industry_data)}chars"
+    )
     return {
         "company": company,
         "ticker": ticker,
-        "raw_data": raw_text,
+        "financial_data": financial_data,
+        "risk_data": risk_data,
+        "industry_data": industry_data,
+        "raw_data": financial_data,
     }
+
+
+_CLEAN_PATTERNS = [
+    (re.compile(r"```(?:json|python|text)?\s*\n"), ""),     # markdown 代码块标记
+    (re.compile(r"```\s*"), ""),                              # 闭合标记
+    (re.compile(r"\n{3,}"), "\n\n"),                          # 超过 2 个连续换行 → 2 个
+    (re.compile(r"[ \t]{2,}"), " "),                          # 连续空格/tab → 1 个空格
+    (re.compile(r"^\s*[-*]{3,}\s*$", re.MULTILINE), ""),    # 分隔线 ---
+]
+
+
+def _clean_text(text: str) -> str:
+    """清洗数据采集输出，去除冗余格式，保留信息内容"""
+    for pattern, replacement in _CLEAN_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text.strip()
+
+
+def _trim_text(text: str, max_length: int) -> str:
+    """截断文本到指定长度，尽量在换行处截断"""
+    if len(text) <= max_length:
+        return text
+    logger.warning(f"数据过长 ({len(text)} 字符)，截断至 {max_length} 字符")
+    truncated = text[:max_length]
+    last_nl = truncated.rfind("\n")
+    if last_nl > max_length * 0.7:
+        return truncated[:last_nl] + f"\n... [数据已截断，原长度 {len(text)} 字符]"
+    return truncated + f"\n... [数据已截断，原长度 {len(text)} 字符]"
 
 
 def collect_analysis_outputs(tasks_output: list[Any]) -> dict[str, Any]:
@@ -37,94 +194,102 @@ def collect_analysis_outputs(tasks_output: list[Any]) -> dict[str, Any]:
 
 
 def calculate_collaboration_scores(tasks_outputs: list[Any]) -> dict[str, Any]:
-    """计算协作评分"""
-    scores: dict[str, Any] = {
-        "fundamental_score": 0,
-        "risk_score": 0,
-        "industry_score": 0,
-        "overall_score": 0,
-    }
-    mapping = [
-        "fundamental_score",
-        "risk_score",
-        "industry_score",
-    ]
+    """计算协作评分，附带数据质量标记"""
+    mapping = ["fundamental_score", "risk_score", "industry_score"]
+    scores: dict[str, Any] = dict.fromkeys(mapping, 0)
+    scores["overall_score"] = 0
+
     for i, output in enumerate(tasks_outputs):
         if i < len(mapping):
             text = str(output.raw) if hasattr(output, "raw") else str(output)
-            score = _extract_score_from_text(text)
-            scores[mapping[i]] = score
+            scores[mapping[i]] = _extract_score_from_text(text)
 
-    valid_scores = [scores[k] for k in mapping if scores[k] > 0]
-    scores["overall_score"] = sum(valid_scores) / len(valid_scores) if valid_scores else 50.0
+    valid = [scores[k] for k in mapping if scores[k] > 0]
+    scores["overall_score"] = sum(valid) / len(valid) if valid else 50.0
+
+    # 检测可疑评分（可能是幻觉）
+    scores["_data_quality"] = _check_score_quality(scores)
     return scores
 
 
-def _extract_score_from_text(text: str) -> float:
-    import re
+def _check_score_quality(scores: dict[str, Any]) -> str:
+    """检测评分质量，返回 'good' / 'suspicious' / 'unreliable'"""
+    mapping = ["fundamental_score", "risk_score", "industry_score"]
+    raw = [scores.get(k, 0) for k in mapping]
 
-    patterns = [
-        r"评分[：:]\s*(\d+(?:\.\d+)?)",
-        r"score[：:\s]*(\d+(?:\.\d+)?)",
-        r"(\d+(?:\.\d+)?)\s*分",
-        r"(\d+(?:\.\d+)?)\s*/\s*100",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return min(float(match.group(1)), 100.0)
+    if all(s == 0 for s in raw):
+        return "unreliable"
+
+    suspicious_count = 0
+    for s in raw:
+        if s > 0 and s % 5 == 0:
+            suspicious_count += 1
+
+    if suspicious_count >= 2:
+        return "suspicious"
+
+    # 极端偏差检测：三个分数彼此差距过大也视为可疑
+    non_zero = [s for s in raw if s > 0]
+    if len(non_zero) >= 2 and max(non_zero) - min(non_zero) > 60:
+        return "suspicious"
+
+    return "good"
+
+
+def _extract_score_from_text(text: str) -> float:
+    """从文本中提取评分（0-100）— 优先匹配最终/综合评分，回退到第一个评分"""
+    for pattern in _FINAL_SCORE_PATTERNS:
+        m = pattern.search(text)
+        if m:
+            return min(float(m.group(1)), 100.0)
+    for pattern in _SCORE_PATTERNS:
+        m = pattern.search(text)
+        if m:
+            return min(float(m.group(1)), 100.0)
     return 50.0
 
 
 def generate_final_recommendation(scores: dict[str, float]) -> dict[str, Any]:
-    """根据评分生成最终投资建议"""
+    """根据评分生成最终投资建议 — 阈值查表"""
     overall = scores.get("overall_score", 50.0)
-    if overall >= 80:
-        action = "强烈买入"
-        confidence = min(overall / 100, 0.95)
-    elif overall >= 65:
-        action = "买入"
-        confidence = min(overall / 100, 0.85)
-    elif overall >= 45:
-        action = "持有"
-        confidence = 0.6
-    elif overall >= 30:
-        action = "卖出"
-        confidence = 0.7
-    else:
-        action = "强烈卖出"
-        confidence = min((100 - overall) / 100, 0.9)
+    for threshold, action, base_confidence in _ACTION_THRESHOLDS:
+        if overall >= threshold:
+            return {
+                "action": action,
+                "confidence": round(min(overall / 100, base_confidence), 4),
+                "overall_score": overall,
+            }
+    # 兜底：强烈卖出
     return {
-        "action": action,
-        "confidence": round(confidence, 4),
+        "action": "强烈卖出",
+        "confidence": round(min((100 - overall) / 100, 0.9), 4),
         "overall_score": overall,
     }
 
 
 def analyze_collaboration_quality(scores: dict[str, float]) -> dict[str, Any]:
-    """分析协作质量"""
-    score_values = [
-        scores.get("fundamental_score", 0),
-        scores.get("risk_score", 0),
-        scores.get("industry_score", 0),
-    ]
-    valid = [s for s in score_values if s > 0]
+    """分析协作质量 — 基于标准差"""
+    keys = ["fundamental_score", "risk_score", "industry_score"]
+    valid = [scores.get(k, 0) for k in keys if scores.get(k, 0) > 0]
+
     if len(valid) < 2:
-        return {"consistency": "low", "collaboration_level": "minimal"}
+        return {"consistency": "low", "collaboration_level": "minimal", "std_dev": 0.0}
 
     avg = sum(valid) / len(valid)
     variance = sum((s - avg) ** 2 for s in valid) / len(valid)
     std_dev = variance**0.5
 
-    if std_dev < 10:
-        consistency = "high"
-    elif std_dev < 20:
-        consistency = "medium"
-    else:
-        consistency = "low"
-
+    consistency = _std_to_consistency(std_dev)
     return {
         "consistency": consistency,
         "std_dev": round(std_dev, 2),
         "collaboration_level": "high" if len(valid) >= 3 else "medium",
     }
+
+
+def _std_to_consistency(std_dev: float) -> str:
+    """标准差映射到一致性等级 — 阈值查表（越小越好）"""
+    for threshold, label in _STD_CONSISTENCY_THRESHOLDS:
+        if std_dev < threshold:
+            return label
+    return "low"

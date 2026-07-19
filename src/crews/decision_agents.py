@@ -63,7 +63,9 @@ def create_investment_advisor(agents_config: dict | None = None) -> Agent:
 def create_report_generator(agents_config: dict | None = None) -> Agent:
     """报告生成器（含质量审核职能）"""
     if agents_config and "report_generator" in agents_config:
-        return Agent(config=agents_config["report_generator"], **_agent_defaults(extra_tools=[DataExportTool()], agent_name="report_generator"))
+        return Agent(
+        config=agents_config["report_generator"],
+        **_agent_defaults(extra_tools=[DataExportTool()], agent_name="report_generator"))
     return Agent(
         role="报告生成专家",
         goal="生成专业的投资分析报告，并确保分析质量和结论的可靠性",

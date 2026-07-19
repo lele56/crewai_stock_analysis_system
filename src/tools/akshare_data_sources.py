@@ -10,13 +10,13 @@ import json
 import logging
 import re
 import ssl
+from typing import Any
 
 import pandas as pd
 
 from src.config import Config
 from src.tools.circuit_breaker import CircuitBreaker
 from src.tools.schemas import (
-    AKSHARE_KLINE_RENAME,
     SINA_SPOT_SCHEMA,
     TENCENT_KLINE_SCHEMA,
     TENCENT_QUOTE_SCHEMA,
@@ -29,7 +29,7 @@ from src.tools.schemas import (
 logger = logging.getLogger(__name__)
 
 
-def _safe_float(val) -> float | None:
+def _safe_float(val: Any) -> float | None:
     """安全转换数值（支持亿/万/千单位）"""
     if val is None or pd.isna(val):
         return None
@@ -61,8 +61,8 @@ _HTTP_HEADERS = {
 TICKFLOW_AVAILABLE = False
 _tickflow_free = None
 try:
-    import sys
     import io
+    import sys
 
     _old_stdout = sys.stdout
     try:
@@ -73,8 +73,8 @@ try:
         TICKFLOW_AVAILABLE = True
     finally:
         sys.stdout = _old_stdout
-except Exception:
-    pass
+except Exception as e:
+    logger.debug(f"TickFlow 导入失败（可选依赖）: {e}")
 
 
 def _to_tickflow_symbol(ticker: str) -> str:

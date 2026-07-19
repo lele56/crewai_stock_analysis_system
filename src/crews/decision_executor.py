@@ -5,24 +5,49 @@ from datetime import datetime
 import json
 import logging
 import os
+import re
 from typing import Any
 
 from src.tasks.collective_decision_maker import (
-    create_investment_decision_vote,
     get_decision_maker,
 )
 
 logger = logging.getLogger(__name__)
 
+# ── 操作 → 评级/分数映射 ──────────────────────────
+_RATING_MAP = {
+    "强烈买入": {"rating": "强烈买入", "score": 90},
+    "买入": {"rating": "买入", "score": 70},
+    "持有": {"rating": "持有", "score": 50},
+    "卖出": {"rating": "卖出", "score": 30},
+    "强烈卖出": {"rating": "强烈卖出", "score": 10},
+}
+
+# ── 评分 → 标签映射 ──────────────────────────────
+_RATING_LABEL_THRESHOLDS = (
+    (80, "优秀"),
+    (60, "良好"),
+    (40, "一般"),
+)
+
 
 def prepare_decision_inputs(analysis_result: dict) -> dict:
     """准备决策输入"""
+    scores = analysis_result.get("collaboration_scores", {})
+    recommendation = analysis_result.get("final_recommendation", {})
+    summary = generate_analysis_summary(
+        analysis_result.get("company", ""),
+        analysis_result.get("ticker", ""),
+        scores,
+        recommendation,
+        {},
+    )
     return {
         "company": analysis_result.get("company", ""),
         "ticker": analysis_result.get("ticker", ""),
-        "scores": analysis_result.get("collaboration_scores", {}),
-        "analysis_recommendations": analysis_result.get("final_recommendation", {}),
-        "analysis_outputs": analysis_result.get("agent_outputs", {}),
+        "scores": scores,
+        "analysis_recommendations": recommendation,
+        "analysis_outputs": summary,
     }
 
 
@@ -37,39 +62,6 @@ def collect_decision_outputs(tasks_output: list[Any]) -> dict[str, Any]:
         else:
             results[f"task_{i}"] = str(output)
     return results
-
-
-def run_collective_decision_vote(company: str, ticker: str, analysis_scores: dict[str, float]) -> dict[str, Any]:
-    """运行集体决策投票"""
-    decision_maker = get_decision_maker()
-    decision_maker.clear_history()
-
-    votes = []
-    for role, score in analysis_scores.items():
-        if role != "overall_score" and score > 0:
-            vote = create_investment_decision_vote(role, score, 0.8)
-            votes.append(vote)
-
-    if not votes:
-        vote = create_investment_decision_vote("default", 50.0, 0.5)
-        votes.append(vote)
-
-    result = decision_maker.decide(votes)
-    result["company"] = company
-    result["ticker"] = ticker
-    return result
-
-
-def _map_score_to_vote(overall_score: float, confidence: float) -> str:
-    if overall_score >= 80:
-        return "强烈买入"
-    if overall_score >= 50:
-        return "买入"
-    if overall_score >= 30:
-        return "持有"
-    if overall_score >= 15:
-        return "卖出"
-    return "强烈卖出"
 
 
 def extract_final_recommendation(decision_result: dict) -> dict[str, Any]:
@@ -90,15 +82,8 @@ def calculate_decision_metrics(decision_result: dict) -> dict[str, Any]:
 
 
 def get_investment_rating(action: str) -> dict:
-    """获取投资评级"""
-    mapping = {
-        "强烈买入": {"rating": "强烈买入", "score": 90},
-        "买入": {"rating": "买入", "score": 70},
-        "持有": {"rating": "持有", "score": 50},
-        "卖出": {"rating": "卖出", "score": 30},
-        "强烈卖出": {"rating": "强烈卖出", "score": 10},
-    }
-    return mapping.get(action, {"rating": action, "score": 50})
+    """获取投资评级 — 查表"""
+    return _RATING_MAP.get(action, {"rating": action, "score": 50})
 
 
 def generate_analysis_summary(
@@ -116,21 +101,21 @@ def generate_analysis_summary(
         "",
     ]
     for name, score in scores.items():
+        if name.startswith("_"):
+            continue
         if name != "overall_score":
             lines.append(f"- **{name}**: {score:.1f}/100")
-    lines.extend(
-        [
-            "",
-            "## 综合评分",
-            f"- **overall**: {scores.get('overall_score', 0):.1f}/100",
-            "",
-            "## 最终建议",
-            f"- **操作**: {recommendation.get('action', '持有')}",
-            f"- **置信度**: {recommendation.get('confidence', 0):.1%}",
-            f"- **投票人数**: {decision_metrics.get('vote_count', 0)}",
-            "",
-        ]
-    )
+    lines.extend([
+        "",
+        "## 综合评分",
+        f"- **overall**: {scores.get('overall_score', 0):.1f}/100",
+        "",
+        "## 最终建议",
+        f"- **操作**: {recommendation.get('action', '持有')}",
+        f"- **置信度**: {recommendation.get('confidence', 0):.1%}",
+        f"- **投票人数**: {decision_metrics.get('vote_count', 0)}",
+        "",
+    ])
     return "\n".join(lines)
 
 
@@ -142,18 +127,14 @@ def generate_investment_report(
     decision_result: dict,
     summary: str,
 ) -> str:
-    """生成投资报告 — 数据驱动，LLM 分析仅作补充"""
+    """生成完整投资分析报告 — 包含数据摘要、各维度分析、评分、决策推理"""
     scores = analysis_result.get("collaboration_scores", {})
     overall = scores.get("overall_score", 0)
     recommendation = decision_result.get("final_recommendation", {})
     action = recommendation.get("action", "持有")
     confidence = recommendation.get("confidence", 0)
 
-    # 评级颜色
-    rating_map = {
-        "强烈买入": "🟢", "买入": "🟢", "持有": "🟡", "卖出": "🔴", "强烈卖出": "🔴",
-    }
-    emoji = rating_map.get(action, "⚪")
+    emoji = _RATING_MAP.get(action, {}).get("score", 50) >= 70 and "🟢" or "🔴"
 
     def _bar(score: float, width: int = 20) -> str:
         filled = int(score / 100 * width)
@@ -172,23 +153,73 @@ def generate_investment_report(
         "",
         "## 综合评分",
         "",
-        f"| 维度 | 评分 | 评级 |",
-        f"|------|------|------|",
+        "| 维度 | 评分 | 评级 |",
+        "|------|------|------|",
     ]
     for name, score in scores.items():
-        if name != "overall_score":
-            level = "优秀" if score >= 80 else "良好" if score >= 60 else "一般" if score >= 40 else "较差"
-            lines.append(f"| {name} | {score:.1f} | {level} |")
+        if name.startswith("_"):
+            continue
+        if name == "overall_score":
+            continue
+        level = _get_rating_label(score)
+        lines.append(f"| {name} | {score:.1f} | {level} |")
     lines.append(f"| **综合** | **{overall:.1f}** | **{_get_rating_label(overall)}** |")
+
+    data_quality = scores.get("_data_quality", "good")
+    if data_quality in ("suspicious", "unreliable"):
+        lines.extend([
+            "",
+            "> ⚠️ **数据质量警告**: 评分基于不完整数据，可能不准确，仅供参考。",
+        ])
 
     lines.extend([
         "",
-        f"```",
+        "```",
         f"综合评分: {_bar(overall)} {overall:.1f}/100",
-        f"```",
+        "```",
         "",
         "---",
-        "",
+    ])
+
+    # ── 分析 Agent 输出 ──
+    agent_outputs = analysis_result.get("agent_outputs", {})
+    if agent_outputs:
+        _TASK_LABELS = {
+            "task_0": "基本面分析",
+            "task_1": "风险评估",
+            "task_2": "行业分析",
+            "task_3": "分析协调",
+        }
+        lines.append("## 各维度分析")
+        lines.append("")
+        for key in sorted(agent_outputs.keys()):
+            label = _TASK_LABELS.get(key, key)
+            text = str(agent_outputs[key]).strip()
+            if text and len(text) > 20:
+                lines.append(f"### {label}")
+                lines.append("")
+                lines.append(text)
+                lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    # ── 决策推理 ──
+    decision_outputs = decision_result.get("decision_outputs", {})
+    if decision_outputs:
+        lines.append("## 投资决策推理")
+        lines.append("")
+        for key, text in decision_outputs.items():
+            text = str(text).strip()
+            if text and len(text) > 20:
+                lines.append(f"### 决策者 {key}")
+                lines.append("")
+                lines.append(text)
+                lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    # ── 数据采集状态 ──
+    lines.extend([
         "## 数据采集状态",
         "",
         f"- 数据采集: {'✅ 成功' if data_collection_result.get('status') == 'success' else '❌ 失败'}",
@@ -198,151 +229,114 @@ def generate_investment_report(
         "---",
         "",
         "## 决策详情",
-        "",
-        f"| 指标 | 值 |",
-        f"|------|-----|",
-        f"| 最终决策 | **{action}** |",
-        f"| 置信度 | {confidence:.1%} |",
-        f"| 投票人数 | {decision_result.get('collective_decision_metrics', {}).get('vote_count', 0)} |",
-        f"| 决策类型 | {decision_result.get('collective_decision_metrics', {}).get('decision_type', 'N/A')} |",
-        "",
-        "---",
-        "",
-        "## AI 分析摘要",
-        "",
-        "> ⚠️ 以下内容由 AI 模型基于收集的数据生成，仅供参考，不构成投资建议。",
-        "> 评分和决策基于真实数据计算，AI 分析为辅助解读。",
-        "",
-        summary,
+        f"- 决策类型: {decision_result.get('collective_decision_metrics', {}).get('decision_type', 'N/A')}",
+        f"- 投票人数: {decision_result.get('collective_decision_metrics', {}).get('vote_count', 0)}",
         "",
         "---",
         "",
         "## 免责声明",
+        "本报告仅供参考，不构成投资建议。投资有风险，入市需谨慎。",
         "",
-        "本报告由 AI 投资分析系统自动生成，数据来源于公开市场信息。",
-        "报告中评分和决策基于真实数据计算，分析文字由 AI 辅助生成。",
-        "**本报告不构成任何投资建议，投资有风险，入市需谨慎。**",
-        "",
+        "**报告由 AI 投资分析系统自动生成**",
     ])
     return "\n".join(lines)
 
 
 def _get_rating_label(score: float) -> str:
-    if score >= 80:
-        return "优秀"
-    if score >= 60:
-        return "良好"
-    if score >= 40:
-        return "一般"
-    if score >= 20:
-        return "较差"
-    return "差"
+    """评分映射到标签 — 阈值查表"""
+    for threshold, label in _RATING_LABEL_THRESHOLDS:
+        if score >= threshold:
+            return label
+    return "较差"
 
 
-def save_report(report_content: str, company: str, ticker: str) -> dict[str, str]:
-    """保存报告为 .md 和 .docx，返回两个路径"""
-    reports_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "reports")
-    os.makedirs(reports_dir, exist_ok=True)
+def analyze_collective_decision(decision_outputs: dict[str, str]) -> dict[str, Any]:
+    """解析决策输出文本，聚合为集体决策共识
+
+    从各 Agent 的文本输出中提取操作建议，通过 CollectiveDecisionMaker 投票聚合。
+    """
+    decision_maker = get_decision_maker()
+    decision_maker.clear_history()
+
+    _ACTION_PATTERN = re.compile(r"(强烈买入|买入|持有|卖出|强烈卖出)")
+    _CONF_PATTERN = re.compile(r"置信度[：:]\s*(\d+(?:\.\d+)?)")
+    _SCORE_PATTERN = re.compile(r"评分[：:]\s*(\d+(?:\.\d+)?)")
+
+    votes = []
+    for task_key, text in decision_outputs.items():
+        action_match = _ACTION_PATTERN.search(text)
+        conf_match = _CONF_PATTERN.search(text) or _SCORE_PATTERN.search(text)
+        action = action_match.group(1) if action_match else "持有"
+
+        if conf_match:
+            raw_value = float(conf_match.group(1))
+            confidence = raw_value / 100 if raw_value > 1 else raw_value
+        else:
+            confidence = 0.5
+        confidence = max(0.1, min(confidence, 1.0))
+        votes.append(decision_maker.cast_vote(task_key, action, confidence, text[:200]))
+
+    if not votes:
+        votes.append(decision_maker.cast_vote("default", "持有", 0.5, "默认投票"))
+
+    return decision_maker.decide(votes)
+
+
+def save_report(report: str, company: str, ticker: str) -> dict[str, str]:
+    """保存报告到文件（md + 可选 docx）
+
+    Returns:
+        {"md": "path/to/report.md", "docx": "path/to/report.docx"}
+    """
+    os.makedirs("reports", exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base = f"analysis_{ticker}_{timestamp}"
+    safe_name = f"{company}_{ticker}_{timestamp}"
 
-    md_path = os.path.join(reports_dir, f"{base}.md")
+    md_path = f"reports/analysis_{safe_name}.md"
     with open(md_path, "w", encoding="utf-8") as f:
-        f.write(report_content)
+        f.write(report)
 
-    docx_path = _save_docx(report_content, reports_dir, base)
-
-    return {"md": md_path, "docx": docx_path}
-
-
-def _save_docx(content: str, reports_dir: str, base: str) -> str:
-    """生成 .docx 文件"""
+    docx_path = ""
     try:
         from docx import Document
-        from docx.shared import Inches, Pt, Cm
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
 
         doc = Document()
-        style = doc.styles["Normal"]
-        style.font.size = Pt(11)
-        style.font.name = "Microsoft YaHei"
-
-        for line in content.split("\n"):
-            if line.startswith("# ") and not line.startswith("## "):
+        for line in report.split("\n"):
+            if line.startswith("# "):
                 doc.add_heading(line[2:], level=1)
             elif line.startswith("## "):
                 doc.add_heading(line[3:], level=2)
             elif line.startswith("### "):
                 doc.add_heading(line[4:], level=3)
-            elif line.startswith("---"):
-                doc.add_paragraph("─" * 60)
-            elif line.startswith("- ") or line.startswith("* "):
-                doc.add_paragraph(line[2:], style="List Bullet")
             elif line.strip():
                 doc.add_paragraph(line)
-
-        docx_path = os.path.join(reports_dir, f"{base}.docx")
+        docx_path = f"reports/analysis_{safe_name}.docx"
         doc.save(docx_path)
-        logger.info(f"DOCX报告已保存: {docx_path}")
-        return docx_path
-    except Exception as e:
-        logger.warning(f"DOCX生成失败: {str(e)[:60]}")
-        return ""
+    except ImportError:
+        logger.debug("python-docx 未安装，跳过 docx 生成")
+
+    return {"md": md_path, "docx": docx_path}
 
 
-class _SafeEncoder(json.JSONEncoder):
-    """安全JSON编码器，处理CrewOutput等不可序列化对象"""
-    def default(self, obj):
-        try:
-            return str(obj)
-        except Exception:
-            return f"<{type(obj).__name__}>"
+def export_to_json(data: dict[str, Any], company: str, ticker: str) -> str:
+    """导出数据为 JSON 文件
 
-
-def export_to_json(data: dict, company: str, ticker: str) -> str:
-    """导出为JSON"""
-    reports_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "reports")
-    os.makedirs(reports_dir, exist_ok=True)
+    Returns:
+        文件路径
+    """
+    os.makedirs("reports", exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"data_{ticker}_{timestamp}.json"
-    filepath = os.path.join(reports_dir, filename)
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False, cls=_SafeEncoder)
-    return filepath
+    safe_name = f"{company}_{ticker}_{timestamp}"
+    json_path = f"reports/data_{safe_name}.json"
 
+    def _serialize(obj: Any) -> Any:
+        if hasattr(obj, "isoformat"):
+            return obj.isoformat()
+        if hasattr(obj, "__dict__"):
+            return str(obj)
+        return str(obj)
 
-def analyze_collective_decision(decision_outputs: dict[str, Any]) -> dict[str, Any]:
-    """分析集体决策结果，评估一致性和置信度"""
-    outputs = list(decision_outputs.values())
-    sentiments = []
-    for output in outputs:
-        text = str(output) if output else ""
-        if "买入" in text and "强烈" in text:
-            sentiments.append(("强烈买入", 0.9))
-        elif "买入" in text:
-            sentiments.append(("买入", 0.7))
-        elif "卖出" in text and "强烈" in text:
-            sentiments.append(("强烈卖出", 0.9))
-        elif "卖出" in text:
-            sentiments.append(("卖出", 0.7))
-        else:
-            sentiments.append(("持有", 0.5))
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2, default=_serialize)
 
-    if not sentiments:
-        return {"consensus": "持有", "confidence": 0.5, "agreement": 0.0, "voter_count": 0}
-
-    from collections import Counter
-
-    vote_counts = Counter(s[0] for s in sentiments)
-    total = len(sentiments)
-    most_common = vote_counts.most_common(1)[0]
-    agreement = most_common[1] / total if total > 0 else 0.0
-    avg_confidence = sum(s[1] for s in sentiments) / total
-
-    return {
-        "consensus": most_common[0],
-        "confidence": round(avg_confidence, 4),
-        "agreement": round(agreement, 4),
-        "voter_count": total,
-        "vote_distribution": dict(vote_counts),
-    }
+    return json_path

@@ -14,8 +14,8 @@ def create_fundamental_analysis_task(tasks_config: dict | None = None) -> Task:
     return Task(
         description="""基于以下采集数据，对{company}进行深度基本面分析：
 
-【原始采集数据】
-{raw_data}
+【财务数据】
+{financial_data}
 
 请完成以下分析：
 1. 分析财务报表（营收、利润、现金流、资产负债）
@@ -40,8 +40,8 @@ def create_risk_assessment_task(tasks_config: dict | None = None) -> Task:
     return Task(
         description="""基于以下采集数据，对{company}进行风险评估：
 
-【原始采集数据】
-{raw_data}
+【市场与技术数据】
+{risk_data}
 
 请完成以下分析：
 1. 分析市场风险（波动率、Beta、最大回撤）
@@ -64,8 +64,8 @@ def create_industry_analysis_task(tasks_config: dict | None = None) -> Task:
     return Task(
         description="""基于以下采集数据，对{company}所在行业进行深度分析：
 
-【原始采集数据】
-{raw_data}
+【市场与行业数据】
+{industry_data}
 
 请完成以下分析：
 1. 行业市场规模和增长趋势

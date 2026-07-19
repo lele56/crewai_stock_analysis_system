@@ -18,9 +18,8 @@ load_dotenv()
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
 from src.config import Config
-from src.flows.batch_analysis_flow import BatchAnalysisFlow
-from src.flows.investment_flow import SmartInvestmentFlow
-from src.stock_analysis_system import StockAnalysisSystem
+
+# 重量级 Flow 导入已移至使用函数内部，避免 --help 时触发完整加载链
 
 _log_level = getattr(logging, Config.LOG_LEVEL, logging.INFO)
 logging.basicConfig(level=_log_level, format=Config.LOG_FORMAT)
@@ -48,6 +47,7 @@ def analyze_single_stock(company: str, ticker: str, use_cache: bool = True) -> d
     """分析单只股票"""
     logger.info(f"开始分析单只股票: {company} ({ticker})")
 
+    from src.stock_analysis_system import StockAnalysisSystem
     system = StockAnalysisSystem()
     result = system.analyze_stock(company, ticker, use_cache)
 
@@ -67,6 +67,7 @@ def analyze_multiple_stocks(stocks: list[dict[str, str]], max_workers: int = 3):
     """批量分析多只股票"""
     logger.info(f"开始批量分析 {len(stocks)} 只股票")
 
+    from src.stock_analysis_system import StockAnalysisSystem
     system = StockAnalysisSystem()
     results = system.analyze_multiple_stocks(stocks, max_workers)
 
@@ -115,6 +116,7 @@ def run_interactive_flow() -> None:
     """运行交互式投资流程"""
     logger.info("启动交互式投资流程")
 
+    from src.flows.investment_flow import SmartInvestmentFlow
     flow = SmartInvestmentFlow()
 
     print("🚀 欢迎使用智能投资分析流程")
@@ -153,6 +155,7 @@ def run_batch_flow() -> None:
     """运行批量分析流程"""
     logger.info("启动批量分析流程")
 
+    from src.flows.batch_analysis_flow import BatchAnalysisFlow
     flow = BatchAnalysisFlow()
 
     print("📊 欢迎使用批量分析流程")

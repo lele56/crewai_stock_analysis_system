@@ -1,3 +1,4 @@
+# src/utils/llm_factory.py
 """LLM 工厂 — 统一 LLM 创建入口
 
 .env 配置示例：
@@ -15,7 +16,6 @@ LLM_MODEL=deepseek/deepseek-chat python main.py
 from __future__ import annotations
 
 import logging
-import os
 
 from crewai import LLM
 

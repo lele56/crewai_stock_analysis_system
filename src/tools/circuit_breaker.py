@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from enum import Enum
 import logging
 import threading
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class CircuitState(Enum):
+    """断路器状态枚举"""
     CLOSED = "closed"          # 正常
     OPEN = "open"              # 熔断，跳过
     HALF_OPEN = "half_open"    # 试探中
@@ -114,18 +116,24 @@ class CircuitBreaker:
             "failure_count": self.failure_count,
             "total_successes": self.total_successes,
             "total_failures": self.total_failures,
-            "last_failure": time.strftime("%H:%M:%S", time.localtime(self.last_failure_time)) if self.last_failure_time else None,
-            "last_success": time.strftime("%H:%M:%S", time.localtime(self.last_success_time)) if self.last_success_time else None,
+            "last_failure": (
+                time.strftime("%H:%M:%S", time.localtime(self.last_failure_time))
+                if self.last_failure_time else None
+            ),
+            "last_success": (
+                time.strftime("%H:%M:%S", time.localtime(self.last_success_time))
+                if self.last_success_time else None
+            ),
         }
 
 
 # ── 装饰器 ──────────────────────────────────────
 
-def with_circuit_breaker(source_name: str):
+def with_circuit_breaker(source_name: str) -> Callable[..., Any]:
     """断路器装饰器 — 自动绕开已熔断的数据源"""
 
-    def decorator(func):
-        def wrapper(*args, **kwargs):
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             cb = CircuitBreaker.get(source_name)
             if not cb.allow_request():
                 logger.debug(f"断路器 [{source_name}]: 已熔断，跳过")

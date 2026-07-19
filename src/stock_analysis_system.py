@@ -129,7 +129,8 @@ class StockAnalysisSystem:
 
             self.analysis_crew._profile = p
             self.analysis_crew._active_agents = Config.get_profile_agents("analysis", p)
-            analysis_result = self.analysis_crew.execute_collaborative_analysis(company, ticker, collection_result["result"])
+            analysis_result = self.analysis_crew.execute_collaborative_analysis(
+                company, ticker, collection_result["result"])
             if not analysis_result["success"]:
                 return {
                     "success": False,
@@ -253,7 +254,8 @@ class StockAnalysisSystem:
         """自动生成技术图表，优先从缓存读取K线数据"""
         charts = []
         try:
-            from src.tools.akshare_data_parser import load_kline_from_cache, get_stock_history_data
+            from src.tools.akshare_data_cache import load_kline_from_cache
+            from src.tools.akshare_data_parser import get_stock_history_data
 
             df = load_kline_from_cache(ticker)
             if df is None or df.empty:

@@ -1,21 +1,63 @@
 # config/tasks_data.yaml
 # 数据收集团队任务
+# 每个任务通过 output_pydantic 强制结构化 JSON 输出，description 只需描述任务目标
 market_research:
-  description: "收集{company}的市场数据和行业信息"
-  expected_output: "市场研究报告"
+  description: |
+    收集{company}的市场数据和行业信息。
+
+    需要获取以下数据（使用 ak_share_data_tool 工具）：
+    - 当前股价、涨跌幅、成交量、20日均量
+    - 52周最高/最低价
+    - Beta系数、30日波动率
+    - 所属板块、行业名称、行业地位（龙头/领先/跟随/挑战者）
+    - 市场份额、主要竞争对手
+    - 行业增长率、行业规模
+    - 行业发展趋势、机遇和挑战
+  expected_output: "市场数据和行业信息的结构化报告"
 
 financial_data_collection:
-  description: "收集{company}(股票代码{ticker})的财务报表和关键财务指标，调用akshare_tool时传ticker={ticker}"
-  expected_output: "财务数据报告"
+  description: |
+    收集{company}(股票代码{ticker})的财务报表和关键财务指标。
+
+    需要获取以下数据（使用 ak_share_data_tool 工具）：
+    - 近三年营收和净利润（按年份列出）
+    - 总资产、总负债、经营现金流
+    - 毛利率、净利率、ROE、ROA
+    - 资产负债率、流动比率、速动比率
+    - 营收同比增长率、净利润同比增长率
+    - PE、PB、PS、总市值、股息率
+  expected_output: "财务数据的结构化报告"
 
 financial_ratio_calculation:
-  description: "对{company}(股票代码{ticker})进行财务比率分析。调用 financial_calculator_tool 两次：1) ticker={ticker}, calculation_type=liquidity,profitability 2) ticker={ticker}, calculation_type=leverage,growth,dcf,valuation。汇总两次结果生成报告"
-  expected_output: "财务比率分析报告"
+  description: |
+    对{company}(股票代码{ticker})进行财务比率分析。
+    调用 financial_calculator_tool 两次：
+    1) ticker={ticker}, calculation_type=liquidity,profitability
+    2) ticker={ticker}, calculation_type=leverage,growth,dcf,valuation
+    汇总两次结果，输出所有财务指标。
+
+    需要输出的字段：
+    - 近三年营收和净利润
+    - 总资产、总负债、经营现金流
+    - 毛利率、净利率、ROE、ROA
+    - 资产负债率、流动比率、速动比率
+    - 营收增长率、利润增长率
+    - PE、PB、PS、总市值、股息率
+  expected_output: "财务比率分析的结构化报告"
 
 technical_data_collection:
-  description: "收集{company}(股票代码{ticker})的技术分析数据，调用技术分析工具时传price_data={ticker}"
-  expected_output: "技术数据报告"
+  description: |
+    收集{company}(股票代码{ticker})的技术分析数据。
+    调用技术分析工具时传 price_data={ticker}。
+
+    需要获取以下技术指标：
+    - MA5、MA20、MA50、MA200 均线
+    - RSI(14)
+    - MACD值、MACD信号线、MACD柱
+    - 布林带上轨、中轨、下轨
+    - ATR(14)
+  expected_output: "技术分析数据的结构化报告"
 
 data_collection_coordination:
-  description: "整合{company}的所有数据收集结果，确保数据完整性和一致性"
+  description: "整合{company}的所有数据收集结果，确保数据完整性和一致性，输出汇总报告"
   expected_output: "数据收集汇总报告"

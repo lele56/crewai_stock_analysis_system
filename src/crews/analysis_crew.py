@@ -132,9 +132,9 @@ class AnalysisCrew:
           analysis_coordinator    → 依赖全部前3个（汇总）
         """
         self._task_list = self.tasks
-        for task, agent in zip(self._task_list, self.agents, strict=False):
-            task.agent = agent
-            task.async_execution = False
+        for t, a in zip(self._task_list, self.agents, strict=False):
+            t.agent = a
+            t.async_execution = False
 
         n = len(self._task_list)
         if n <= 1:
